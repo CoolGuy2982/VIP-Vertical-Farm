@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# VIP Vertical Farm — data files (not code)
+data/images/
+data/logs/
+!data/logs/.gitkeep
+!data/images/.gitkeep

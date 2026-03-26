@@ -1,0 +1,90 @@
+# VIP Vertical Farm — AI Grower Configuration
+
+plant:
+  species: "basil"
+  variety: "Genovese Sweet Basil"
+  planted_date: "2026-03-26"
+  growth_stages:
+    - name: "germination"
+      typical_days: [0, 7]
+      ideal_temp_c: [22, 28]
+      ideal_humidity_pct: [70, 90]
+      ideal_soil_moisture_pct: [60, 80]
+      light_hours: 0
+    - name: "seedling"
+      typical_days: [7, 21]
+      ideal_temp_c: [20, 26]
+      ideal_humidity_pct: [60, 75]
+      ideal_soil_moisture_pct: [50, 70]
+      light_hours: 14
+    - name: "vegetative"
+      typical_days: [21, 60]
+      ideal_temp_c: [20, 28]
+      ideal_humidity_pct: [50, 70]
+      ideal_soil_moisture_pct: [40, 65]
+      light_hours: 16
+    - name: "mature"
+      typical_days: [60, 999]
+      ideal_temp_c: [20, 28]
+      ideal_humidity_pct: [40, 60]
+      ideal_soil_moisture_pct: [35, 55]
+      light_hours: 14
+
+# GPIO pin numbers (BCM)
+gpio:
+  water_pump_pin: 17    # Relay 1 → water pump
+  grow_light_pin: 27    # Relay 2 → grow light
+
+# ADC (MCP3008 via SPI) for analog sensors
+adc:
+  spi_port: 0
+  spi_device: 0
+  vref: 3.3
+  soil_moisture_channel: 0
+  light_sensor_channel: 1
+
+# DHT22 temp/humidity sensor
+gpio_dht:
+  pin: 4
+
+# Water pump calibration
+water_pump:
+  min_seconds_per_dose: 1
+  max_seconds_per_dose: 60   # Never run longer than 60s in one shot
+
+# Grow light
+light:
+  max_on_minutes: 1440       # 24h max (safety cap)
+
+# Camera
+camera:
+  device_index: 0
+  resolution: [1280, 720]
+  image_dir: "data/images"
+
+# Gemini API
+gemini:
+  model: "gemini-3-flash-preview"
+  max_output_tokens: 4096
+  thinking: true
+
+# Context / memory management
+context:
+  max_recent_decisions: 15
+  compression_interval_hours: 24
+  sensor_trend_hours: 24
+
+# Scheduler
+scheduler:
+  min_checkin_minutes: 1
+  max_checkin_minutes: 480
+
+# Local API server
+api:
+  host: "0.0.0.0"
+  port: 8080
+
+# Alerts
+alerts:
+  critical_temp_c: [5, 40]
+  critical_moisture_pct: [10, 95]

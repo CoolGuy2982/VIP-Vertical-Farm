@@ -1,0 +1,27 @@
+# VIP Vertical Farm — Dependencies
+# =================================
+
+# Gemini API
+google-genai>=1.55.0
+
+# API server
+fastapi>=0.115.0
+uvicorn>=0.34.0
+pydantic>=2.0
+
+# Configuration
+pyyaml>=6.0
+python-dotenv>=1.0
+
+# Camera (install on Pi and dev machines)
+opencv-python-headless>=4.9.0
+Pillow>=10.0
+
+# ── Raspberry Pi only (install on Pi) ──
+# Uncomment these when deploying to Raspberry Pi:
+# adafruit-circuitpython-dht>=4.0
+# adafruit-circuitpython-mcp3xxx>=1.4
+# RPi.GPIO>=0.7.0
+# board
+# busio
+# digitalio
