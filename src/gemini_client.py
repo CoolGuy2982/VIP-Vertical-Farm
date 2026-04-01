@@ -13,24 +13,57 @@ logger = logging.getLogger(__name__)
 
 GROWER_TOOLS = [
     {
-        "name": "read_sensors",
+        "name": "capture_plant",
         "description": (
-            "Read all current sensor values: temperature (°C), humidity (%), "
-            "soil moisture (%), and ambient light level (lux). "
-            "Call this at the start of every check-in and before/after any action "
-            "to establish a baseline."
-        ),
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "capture_image",
-        "description": (
-            "Take a photo of the plant right now and analyze it. "
+            "Take a photo of the plant with the plant camera. "
             "Look for: leaf color, turgor pressure (wilting/rigidity), stem posture, "
             "signs of disease (spots, mold, discoloration), new growth, root visibility. "
             "Call this every check-in and after any action you want visual confirmation of."
         ),
         "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "capture_dashboard",
+        "description": (
+            "Take a photo of the grow tent's sensor dashboard with the dashboard camera. "
+            "Read the temperature, humidity, soil moisture, and any other values shown. "
+            "After reading the dashboard, ALWAYS call report_sensors with the values you see. "
+            "Call this at the start of every check-in to get current conditions."
+        ),
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "report_sensors",
+        "description": (
+            "Report the sensor values you read from the dashboard camera image. "
+            "Call this immediately after capture_dashboard with the values you extracted. "
+            "This stores them for trend tracking and history."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "temperature_c": {
+                    "type": "number",
+                    "description": "Temperature in Celsius from the dashboard",
+                },
+                "humidity_pct": {
+                    "type": "number",
+                    "description": "Relative humidity percentage from the dashboard",
+                },
+                "soil_moisture_pct": {
+                    "type": "number",
+                    "description": "Soil moisture percentage if shown on dashboard",
+                },
+                "light_lux": {
+                    "type": "number",
+                    "description": "Light level if shown on dashboard",
+                },
+                "other_readings": {
+                    "type": "string",
+                    "description": "Any other values visible on the dashboard",
+                },
+            },
+        },
     },
     {
         "name": "run_pump",
@@ -262,16 +295,23 @@ GROWER_TOOLS = [
 def _build_tool_declarations() -> list[dict]:
     return [
         {
-            "function_declarations": [
-                {
-                    "name": t["name"],
-                    "description": t["description"],
-                    "parameters": t["parameters"],
-                }
-                for t in GROWER_TOOLS
-            ]
+            "type": "function",
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["parameters"],
         }
+        for t in GROWER_TOOLS
     ]
+
+
+def _clean_result(obj):
+    """Strip empty lists, dicts, and None values so the API doesn't choke."""
+    if isinstance(obj, dict):
+        return {k: _clean_result(v) for k, v in obj.items()
+                if v is not None and v != [] and v != {}}
+    if isinstance(obj, list):
+        return [_clean_result(item) for item in obj]
+    return obj
 
 
 class GeminiClient:
@@ -294,22 +334,23 @@ class GeminiClient:
         self,
         system_instruction: str,
         user_message: str,
-        image_path: Optional[str] = None,
+        image_paths: Optional[list[str]] = None,
         use_tools: bool = True,
         continue_chain: bool = True,
     ):
         input_parts = []
 
-        if image_path and Path(image_path).exists():
-            with open(image_path, "rb") as f:
-                image_data = base64.b64encode(f.read()).decode("utf-8")
-            ext = Path(image_path).suffix.lower()
-            mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-                        ".png": "image/png", ".webp": "image/webp"}
-            mime_type = mime_map.get(ext, "image/jpeg")
-            input_parts.append({"inline_data": {"mime_type": mime_type, "data": image_data}})
+        for image_path in (image_paths or []):
+            if image_path and Path(image_path).exists():
+                with open(image_path, "rb") as f:
+                    image_data = base64.b64encode(f.read()).decode("utf-8")
+                ext = Path(image_path).suffix.lower()
+                mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                            ".png": "image/png", ".webp": "image/webp"}
+                mime_type = mime_map.get(ext, "image/jpeg")
+                input_parts.append({"type": "image", "mime_type": mime_type, "data": image_data})
 
-        input_parts.append(user_message)
+        input_parts.append({"type": "text", "text": user_message})
 
         previous_id = None
         if continue_chain and self._last_interaction_id:
@@ -318,7 +359,7 @@ class GeminiClient:
 
         kwargs = {
             "model": self.model,
-            "input": input_parts if len(input_parts) > 1 else user_message,
+            "input": input_parts,
             "system_instruction": system_instruction,
             "generation_config": {"max_output_tokens": self.max_tokens},
         }
@@ -330,10 +371,8 @@ class GeminiClient:
             kwargs["previous_interaction_id"] = previous_id
 
         if self.thinking:
-            kwargs["generation_config"]["thinking"] = {
-                "enabled": True,
-                "include_thoughts": True,
-            }
+            kwargs["generation_config"]["thinking_level"] = "high"
+            kwargs["generation_config"]["thinking_summaries"] = "auto"
 
         logger.info("Gemini interaction (chain=%d, model=%s)", self._chain_length, self.model)
         interaction = self.client.interactions.create(**kwargs)
@@ -350,16 +389,13 @@ class GeminiClient:
     ):
         input_parts = []
         for result in tool_results:
+            raw = result["result"]
+            cleaned = _clean_result(raw) if isinstance(raw, dict) else {"result": raw}
             input_parts.append({
-                "function_response": {
-                    "id": result["call_id"],
-                    "name": result["name"],
-                    "response": (
-                        result["result"]
-                        if isinstance(result["result"], dict)
-                        else {"result": result["result"]}
-                    ),
-                }
+                "type": "function_result",
+                "call_id": result["call_id"],
+                "name": result["name"],
+                "result": cleaned,
             })
 
         interaction = self.client.interactions.create(
@@ -391,15 +427,20 @@ class GeminiClient:
 
         for output in interaction.outputs:
             if output.type == "text":
-                result["text"] = output.text
+                result["text"] = str(output.text) if output.text else None
             elif output.type == "thought":
                 if hasattr(output, "summary") and output.summary:
-                    result["thoughts"].append(output.summary)
+                    result["thoughts"].append(str(output.summary))
             elif output.type == "function_call":
+                args = output.arguments
+                if hasattr(args, "model_dump"):
+                    args = args.model_dump()
+                elif hasattr(args, "__dict__") and not isinstance(args, dict):
+                    args = dict(args)
                 result["function_calls"].append({
-                    "id": output.id,
-                    "name": output.name,
-                    "arguments": output.arguments,
+                    "id": str(output.id),
+                    "name": str(output.name),
+                    "arguments": args if isinstance(args, dict) else {},
                 })
 
         return result

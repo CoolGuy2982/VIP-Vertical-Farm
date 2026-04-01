@@ -17,12 +17,14 @@ LOG_FILE = "data/logs/grower.log"
 def setup_logging(base_dir: str):
     log_path = Path(base_dir) / LOG_FILE
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    stdout_handler.setStream(open(sys.stdout.fileno(), mode='w', encoding='utf-8', closefd=False))
     logging.basicConfig(
         level=logging.INFO,
         format=LOG_FORMAT,
         handlers=[
-            logging.StreamHandler(sys.stdout),
-            logging.FileHandler(log_path),
+            stdout_handler,
+            logging.FileHandler(log_path, encoding="utf-8"),
         ],
     )
 

@@ -8,6 +8,7 @@ from .action_scheduler import ActionScheduler, ScheduledAction
 from .actuators import Actuators
 from .camera import Camera
 from .context_manager import ContextManager
+from .firebase_sync import FirebaseSync
 from .gemini_client import GeminiClient
 from .growth_tracker import GrowthTracker
 from .sensors import Sensors
@@ -29,6 +30,7 @@ class AIGrower:
         self.growth = GrowthTracker(base_dir)
         self.gemini = GeminiClient(config)
         self.scheduler = ActionScheduler(config, base_dir)
+        self.firebase = FirebaseSync(config, base_dir)
 
         self._checkin_lock = False
         self._alert_log: list[dict] = []
@@ -49,6 +51,7 @@ class AIGrower:
                     self.context.get_days_since_planting())
         logger.info("=" * 60)
         self.scheduler.start()
+        self.firebase.start()
         self.scheduler.schedule_checkin(1, "Initial startup check-in")
 
     def _handle_checkin_action(self, action: ScheduledAction):
@@ -96,16 +99,19 @@ class AIGrower:
             logger.info("[%s] Day %d - %s", trigger_type.upper(), day,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+            images = self.camera.capture_both(trigger_type)
+            plant_image = images.get("plant")
+            dashboard_image = images.get("dashboard")
+
+            if plant_image:
+                self.firebase.upload_image(plant_image, f"{trigger_type}_plant")
+            if dashboard_image:
+                self.firebase.upload_image(dashboard_image, f"{trigger_type}_dashboard")
+
             sensor_data = self.sensors.read_all()
             self.context.log_sensors(sensor_data)
+            self.firebase.log_sensors(sensor_data)
 
-            logger.info("T=%.1f°C RH=%.1f%% SM=%.1f%% L=%.0flx",
-                        sensor_data.get("temperature_c", 0),
-                        sensor_data.get("humidity_pct", 0),
-                        sensor_data.get("soil_moisture_pct", 0),
-                        sensor_data.get("light_lux", 0))
-
-            image_path = self.camera.capture(trigger_type)
             sensor_trends = self.context.get_sensor_trends()
             pending = self.scheduler.get_pending()
 
@@ -119,9 +125,16 @@ class AIGrower:
                 trigger_context=trigger_context,
             )
 
+            image_note = ""
+            if plant_image:
+                image_note += "Image 1 is the PLANT camera. "
+            if dashboard_image:
+                image_note += "Image 2 is the DASHBOARD camera showing sensor readings. Read the values and call report_sensors. "
+
             if trigger_type == "observe":
                 user_message = (
                     f"{context_msg}\n\n---\n\n"
+                    f"{image_note}\n"
                     f"This is the OBSERVATION RESULT you scheduled. "
                     f"Analyze what changed, whether your hypothesis was correct, "
                     f"and what you learned. Update your mental model of this setup. "
@@ -130,14 +143,17 @@ class AIGrower:
             else:
                 user_message = (
                     f"{context_msg}\n\n---\n\n"
-                    f"Time for your check-in. Observe all sensor data and the plant image carefully. "
+                    f"{image_note}\n"
+                    f"Time for your check-in. Read the dashboard image for sensor values "
+                    f"and call report_sensors. Examine the plant image for health. "
                     f"Apply your agricultural expertise: assess VPD, check moisture trends, "
                     f"look for stress signals. Take precise, measured actions. "
                     f"Use observe_in to close feedback loops on any action you take. "
                     f"Schedule your next check-in."
                 )
 
-            response = self._run_tool_loop(system_prompt, user_message, image_path)
+            check_images = [p for p in [plant_image, dashboard_image] if p]
+            response = self._run_tool_loop(system_prompt, user_message, check_images)
 
             elapsed = time.time() - checkin_start
             self._log_decision(response, sensor_data, elapsed, trigger_type)
@@ -152,7 +168,7 @@ class AIGrower:
             self._checkin_lock = False
 
     def _run_tool_loop(self, system_prompt: str, user_message: str,
-                       image_path: str | None) -> dict:
+                       image_paths: list[str] | None = None) -> dict:
         all_actions = []
         all_thoughts = []
         final_text = None
@@ -160,7 +176,7 @@ class AIGrower:
         interaction = self.gemini.create_interaction(
             system_instruction=system_prompt,
             user_message=user_message,
-            image_path=image_path,
+            image_paths=image_paths or [],
             use_tools=True,
         )
 
@@ -200,17 +216,30 @@ class AIGrower:
         return {"text": final_text, "actions": all_actions, "thoughts": all_thoughts}
 
     def _execute_tool(self, name: str, arguments: dict) -> dict:
-        logger.info("  → %s(%s)", name, json.dumps(arguments)[:150])
+        logger.info("  -> %s(%s)", name, json.dumps(arguments)[:150])
 
         try:
-            if name == "read_sensors":
+            if name == "capture_plant":
+                path = self.camera.capture_plant("tool_capture")
+                if path:
+                    self.firebase.upload_image(path, "tool_plant")
+                return {"image_path": path, "captured": path is not None,
+                        "camera": "plant"}
+
+            elif name == "capture_dashboard":
+                path = self.camera.capture_dashboard("tool_capture")
+                if path:
+                    self.firebase.upload_image(path, "tool_dashboard")
+                return {"image_path": path, "captured": path is not None,
+                        "camera": "dashboard",
+                        "note": "Read the values shown and call report_sensors"}
+
+            elif name == "report_sensors":
+                self.sensors.update_from_ai(arguments)
                 data = self.sensors.read_all()
                 self.context.log_sensors(data)
-                return data
-
-            elif name == "capture_image":
-                path = self.camera.capture("tool_capture")
-                return {"image_path": path, "captured": path is not None}
+                self.firebase.log_sensors(data)
+                return {"logged": True, "values": data}
 
             elif name == "run_pump":
                 return self.actuators.run_pump(arguments.get("seconds", 5))
@@ -222,11 +251,10 @@ class AIGrower:
                 return self.actuators.turn_off_lights()
 
             elif name == "observe_in":
-                before_sensors = self.sensors.read_all()
                 action = self.scheduler.schedule_observe(
                     delay_minutes=arguments.get("delay_minutes", 15),
                     context=arguments.get("context", ""),
-                    before_sensors=before_sensors,
+                    before_sensors=self.sensors.read_all(),
                 )
                 return {
                     "scheduled": True,
@@ -265,6 +293,7 @@ class AIGrower:
                     "measurements": arguments.get("measurements", {}),
                 }
                 self.context.log_milestone(milestone)
+                self.firebase.log_milestone(milestone)
                 measurements = arguments.get("measurements", {})
                 if measurements:
                     self.growth.record_measurement(
@@ -321,6 +350,7 @@ class AIGrower:
             "elapsed_seconds": round(elapsed, 1),
         }
         self.context.log_decision(decision)
+        self.firebase.log_decision(decision)
 
     def _extract_section(self, text: str, header: str) -> str:
         if not text:
@@ -362,6 +392,7 @@ class AIGrower:
                         text = text[4:]
                 summary = json.loads(text.strip())
                 self.context.save_growth_summary(summary)
+                self.firebase.save_growth_summary(summary)
                 self.gemini.reset_chain()
                 logger.info("Context compressed")
             except (json.JSONDecodeError, IndexError) as e:
@@ -375,6 +406,7 @@ class AIGrower:
             "day": self.context.get_days_since_planting(),
         }
         self._alert_log.append(alert)
+        self.firebase.log_alert(alert)
         logger.warning("ALERT [%s]: %s", severity, message)
         return {"logged": True, **alert}
 
@@ -391,7 +423,8 @@ class AIGrower:
             "growth_summary": self.context.get_growth_summary(),
             "recent_decisions": self.context.get_recent_decisions(5),
             "growth_data": self.growth.get_summary(),
-            "latest_image": self.camera.get_latest_image(),
+            "latest_plant_image": self.camera.get_latest_image("plant"),
+            "latest_dashboard_image": self.camera.get_latest_image("dashboard"),
             "alerts": self._alert_log[-10:],
         }
 
@@ -402,6 +435,7 @@ class AIGrower:
 
     def cleanup(self):
         logger.info("AI Grower shutting down...")
+        self.firebase.stop()
         self.scheduler.stop()
         self.sensors.cleanup()
         self.actuators.cleanup()

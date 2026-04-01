@@ -94,22 +94,40 @@ def cancel_action(action_id: str):
 
 # camera
 
-@app.get("/api/camera/latest")
-def get_latest_image():
+@app.get("/api/camera/plant/latest")
+def get_latest_plant_image():
     grower = _g()
-    path = grower.camera.get_latest_image()
+    path = grower.camera.get_latest_image("plant")
     if path and Path(path).exists():
         return FileResponse(path, media_type="image/jpeg")
-    raise HTTPException(404, "No images yet")
+    raise HTTPException(404, "No plant images yet")
 
 
-@app.post("/api/camera/capture")
-def capture_image():
+@app.get("/api/camera/dashboard/latest")
+def get_latest_dashboard_image():
     grower = _g()
-    path = grower.camera.capture("manual")
+    path = grower.camera.get_latest_image("dashboard")
+    if path and Path(path).exists():
+        return FileResponse(path, media_type="image/jpeg")
+    raise HTTPException(404, "No dashboard images yet")
+
+
+@app.post("/api/camera/plant/capture")
+def capture_plant_image():
+    grower = _g()
+    path = grower.camera.capture_plant("manual")
     if path:
         return {"image_path": path, "captured": True}
-    raise HTTPException(500, "Camera capture failed")
+    raise HTTPException(500, "Plant camera capture failed")
+
+
+@app.post("/api/camera/dashboard/capture")
+def capture_dashboard_image():
+    grower = _g()
+    path = grower.camera.capture_dashboard("manual")
+    if path:
+        return {"image_path": path, "captured": True}
+    raise HTTPException(500, "Dashboard camera capture failed")
 
 
 # manual controls

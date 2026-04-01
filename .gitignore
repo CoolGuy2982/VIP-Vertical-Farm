@@ -211,3 +211,6 @@ data/images/
 data/logs/
 !data/logs/.gitkeep
 !data/images/.gitkeep
+
+# Firebase credentials (never commit)
+firebase-credentials.json

@@ -17,11 +17,8 @@ python-dotenv>=1.0
 opencv-python-headless>=4.9.0
 Pillow>=10.0
 
-# ── Raspberry Pi only (install on Pi) ──
-# Uncomment these when deploying to Raspberry Pi:
-# adafruit-circuitpython-dht>=4.0
-# adafruit-circuitpython-mcp3xxx>=1.4
+# Firebase cloud backup
+firebase-admin>=6.0
+
+# Raspberry Pi only (install on Pi for relay control)
 # RPi.GPIO>=0.7.0
-# board
-# busio
-# digitalio

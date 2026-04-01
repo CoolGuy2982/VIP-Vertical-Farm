@@ -35,17 +35,7 @@ gpio:
   water_pump_pin: 17    # Relay 1 → water pump
   grow_light_pin: 27    # Relay 2 → grow light
 
-# ADC (MCP3008 via SPI) for analog sensors
-adc:
-  spi_port: 0
-  spi_device: 0
-  vref: 3.3
-  soil_moisture_channel: 0
-  light_sensor_channel: 1
-
-# DHT22 temp/humidity sensor
-gpio_dht:
-  pin: 4
+# No hardware sensors -- the AI reads values from the tent dashboard camera
 
 # Water pump calibration
 water_pump:
@@ -56,9 +46,10 @@ water_pump:
 light:
   max_on_minutes: 1440       # 24h max (safety cap)
 
-# Camera
+# Cameras (two USB webcams)
 camera:
-  device_index: 0
+  plant_cam_index: 0        # USB webcam pointed at the plant
+  dashboard_cam_index: 1    # USB webcam pointed at the tent dashboard
   resolution: [1280, 720]
   image_dir: "data/images"
 
@@ -83,6 +74,13 @@ scheduler:
 api:
   host: "0.0.0.0"
   port: 8080
+
+# Firebase cloud backup
+firebase:
+  enabled: true
+  credentials_path: "firebase-credentials.json"
+  storage_bucket: "vip-farm-35099.firebasestorage.app"
+  device_id: "pi-grower-01"
 
 # Alerts
 alerts:
