@@ -214,3 +214,6 @@ data/logs/
 
 # Firebase credentials (never commit)
 firebase-credentials.json
+
+# Cached downloads (RPi OS images)
+.cache/
