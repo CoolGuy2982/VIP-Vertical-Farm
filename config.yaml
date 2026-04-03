@@ -36,11 +36,11 @@ hardware_specs:
   tray_tilt_degrees: 19
 
 # GPIO pin numbers (BOARD — Jetson Nano 40-pin header)
-# Relay board receives 3.3V power from Pin 1 for VCC (also Pins 2/4 available for 5V)
-# Signal Pins: Light = 3, Pump = 5. Ground = 6.
+# Relay board receives 3.3V power from Pin 1 for VCC
+# Signal Pins: Light = 7, Pump = 11. Ground = 6.
 gpio:
-  water_pump_pin: 5     # Relay 1 → water pump (BOARD Pin 5)
-  grow_light_pin: 3     # Relay 2 → grow light (BOARD Pin 3)
+  water_pump_pin: 11    # Relay 1 → water pump (BOARD Pin 11)
+  grow_light_pin: 7     # Relay 2 → grow light (BOARD Pin 7)
   dashboard_relay_pin: 22 # Not used (dashboard always on)
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
