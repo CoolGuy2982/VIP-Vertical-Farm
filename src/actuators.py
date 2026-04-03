@@ -27,7 +27,7 @@ class Actuators:
         self._init_gpio()
 
     def _init_gpio(self):
-        GPIO.setmode(GPIO.BCM)
+        GPIO.setmode(GPIO.BOARD)
         GPIO.setwarnings(False)
         GPIO.setup(self.pump_pin, GPIO.OUT)
         GPIO.setup(self.light_pin, GPIO.OUT)
@@ -35,7 +35,7 @@ class Actuators:
         GPIO.output(self.pump_pin, GPIO.LOW)
         GPIO.output(self.light_pin, GPIO.LOW)
         GPIO.output(self.dash_pin, GPIO.LOW)
-        logger.info("GPIO initialized (Jetson Nano 40-pin header)")
+        logger.info("GPIO initialized (BOARD numbering - Jetson Nano 40-pin header)")
 
     def run_pump(self, seconds: float) -> dict:
         pump_config = self.config.get("water_pump", {})

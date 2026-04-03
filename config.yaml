@@ -1,8 +1,8 @@
 # VIP Vertical Farm — AI Grower Configuration
 
 plant:
-  species: "basil"
-  variety: "Genovese Sweet Basil"
+  species: "Lettuce"
+  variety: "Diversified Lettuce Tray"
   planted_date: "2026-04-03"
   growth_stages:
     - name: "germination"
@@ -30,11 +30,18 @@ plant:
       ideal_soil_moisture_pct: [35, 55]
       light_hours: 14
 
-# GPIO pin numbers (BCM — Jetson Nano 40-pin header)
+# Hardware Specifications
+hardware_specs:
+  flow_rate_ml_s: 168
+  tray_tilt_degrees: 19
+
+# GPIO pin numbers (BOARD — Jetson Nano 40-pin header)
+# Relay board receives 3.3V power from Pin 1 for VCC (also Pins 2/4 available for 5V)
+# Signal Pins: Light = 3, Pump = 5. Ground = 6.
 gpio:
-  water_pump_pin: 17    # Relay 1 → water pump
-  grow_light_pin: 27    # Relay 2 → grow light
-  dashboard_relay_pin: 22 # Relay 3 → dashboard backlight
+  water_pump_pin: 5     # Relay 1 → water pump (BOARD Pin 5)
+  grow_light_pin: 3     # Relay 2 → grow light (BOARD Pin 3)
+  dashboard_relay_pin: 22 # Not used (dashboard always on)
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
 
