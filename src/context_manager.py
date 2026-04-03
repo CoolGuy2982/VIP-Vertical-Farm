@@ -192,6 +192,11 @@ class ContextManager:
 - Stage: {stage.get('name', 'unknown')}
 - Target temp: {stage.get('ideal_temp_c', 'N/A')}C | Target RH: {stage.get('ideal_humidity_pct', 'N/A')}% | Target soil moisture: {stage.get('ideal_soil_moisture_pct', 'N/A')}% | Target photoperiod: {stage.get('light_hours', 'N/A')}h/day
 
+## Day 1: Production Start (Strict Logic)
+- **Baseline assessment**: This is Day 1. Your primary goal is to establish a rock-solid baseline of current conditions and initial state.
+- **No premature milestones**: Do NOT report germination, seedling emergence, or any other growth milestones today. You must wait for BOTH visual evidence (from the plant camera) AND for the growth clock (Day 7+) to align with the species' typical profile. 
+- **Focus on the setup**: On Day 1, calibrate your mental model of the equipment. Look for any initial stress, ensure the soil moisture is at the target for germination (60-80%), and verify the dashboard is readable.
+
 ## Your Eyes: Two Cameras
 You have TWO cameras:
 1. **Plant camera** - pointed at the plant. Use this to assess health, growth, stress signals.

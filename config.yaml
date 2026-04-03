@@ -3,7 +3,7 @@
 plant:
   species: "basil"
   variety: "Genovese Sweet Basil"
-  planted_date: "2026-03-26"
+  planted_date: "2026-04-03"
   growth_stages:
     - name: "germination"
       typical_days: [0, 7]
@@ -50,7 +50,7 @@ light:
 # Cameras (two USB webcams)
 camera:
   plant_cam_index: 0        # USB webcam pointed at the plant
-  dashboard_cam_index: 1    # USB webcam pointed at the tent dashboard
+  dashboard_cam_index: 2    # USB webcam pointed at the tent dashboard
   resolution: [1280, 720]
   image_dir: "data/images"
 
