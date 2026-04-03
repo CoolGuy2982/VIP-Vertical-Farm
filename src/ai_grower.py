@@ -166,7 +166,10 @@ class AIGrower:
             response = self._run_tool_loop(system_prompt, user_message, check_images)
 
             elapsed = time.time() - checkin_start
-            self._log_decision(response, sensor_data, elapsed, trigger_type)
+            self._log_decision(
+                response, sensor_data, elapsed, trigger_type,
+                system_prompt, user_message
+            )
 
             logger.info("[%s] done in %.1fs", trigger_type.upper(), elapsed)
 
@@ -182,6 +185,7 @@ class AIGrower:
         all_actions = []
         all_thoughts = []
         final_text = None
+        interaction_id = None
 
         interaction = self.gemini.create_interaction(
             system_instruction=system_prompt,
@@ -192,6 +196,7 @@ class AIGrower:
 
         for round_num in range(MAX_TOOL_ROUNDS):
             parsed = self.gemini.extract_response(interaction)
+            interaction_id = parsed["interaction_id"]
             all_thoughts.extend(parsed["thoughts"])
 
             if parsed["text"] and not parsed["function_calls"]:
@@ -223,7 +228,12 @@ class AIGrower:
                 logger.warning("Empty Gemini response (round %d)", round_num)
                 break
 
-        return {"text": final_text, "actions": all_actions, "thoughts": all_thoughts}
+        return {
+            "text": final_text,
+            "actions": all_actions,
+            "thoughts": all_thoughts,
+            "interaction_id": interaction_id
+        }
 
     def _execute_tool(self, name: str, arguments: dict) -> dict:
         logger.info("  -> %s(%s)", name, json.dumps(arguments)[:150])
@@ -342,18 +352,22 @@ class AIGrower:
             return {"error": str(e)}
 
     def _log_decision(self, response: dict, sensors: dict,
-                      elapsed: float, trigger_type: str):
+                      elapsed: float, trigger_type: str,
+                      system_prompt: str, user_raw_message: str):
         text = response["text"] or ""
         decision = {
             "timestamp": datetime.now().isoformat(),
+            "interaction_id": response.get("interaction_id"),
             "day": self.context.get_days_since_planting(),
             "trigger_type": trigger_type,
+            "system_prompt": system_prompt,
+            "user_raw_message": user_raw_message,
             "sensors": {k: v for k, v in sensors.items()
                         if k not in ("timestamp", "errors")},
             "observation": self._extract_section(text, "Observation"),
             "reasoning": self._extract_section(text, "Hypothesis"),
             "outcome": self._extract_section(text, "Feedback Loop"),
-            "actions": [{"tool": a["tool"], "args": a["args"]}
+            "actions": [{"tool": a["tool"], "args": a["args"], "result": a.get("result")}
                         for a in response["actions"]],
             "full_response": text,
             "thoughts": response["thoughts"],
