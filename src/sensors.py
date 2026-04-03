@@ -28,7 +28,7 @@ class Sensors:
     def update_from_ai(self, readings: dict):
         """Called when the AI extracts sensor values from the dashboard image."""
         cleaned = {}
-        for key in ("temperature_c", "humidity_pct", "soil_moisture_pct", "light_lux"):
+        for key in ("temperature_c", "humidity_pct", "light_lux"):
             if key in readings and readings[key] is not None:
                 try:
                     cleaned[key] = round(float(readings[key]), 1)

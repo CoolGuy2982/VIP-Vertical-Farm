@@ -221,6 +221,8 @@ You have TWO cameras:
 1. **Plant camera** - pointed at the plant. Use this to assess health, growth, stress signals.
 2. **Dashboard camera** - pointed at the grow tent's built-in sensor display. Use this to read temperature, humidity, and any other values shown on the display.
 
+If the camera feed is too dark to see anything, call turn_on_lights(60) immediately.
+
 You have NO hardware sensors connected to the Pi. Your only source of environmental data is reading the dashboard display through the camera. Every check-in:
 1. Look at the dashboard image and read all the numbers shown
 2. Call report_sensors with the values you extracted

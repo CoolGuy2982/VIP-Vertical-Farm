@@ -48,6 +48,16 @@ def main():
     grower = AIGrower(config, base_dir)
     set_grower(grower)
 
+    # Hardware test: Toggle pins 7 and 11 for 10 seconds each
+    logger.info("Starting hardware test: Light (Pin 7) for 10s...")
+    grower.actuators.turn_on_lights(10/60) # 10 seconds in minutes
+    time.sleep(10)
+    grower.actuators.turn_off_lights()
+    
+    logger.info("Starting hardware test: Pump (Pin 11) for 10s...")
+    grower.actuators.run_pump(10)
+    logger.info("Hardware test complete.")
+
     def shutdown(signum, frame):
         logger.info("Shutdown received")
         grower.cleanup()
