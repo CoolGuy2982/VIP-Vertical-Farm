@@ -59,7 +59,7 @@ class Camera:
 
             # Rotation correction for plant camera
             if cam_name == "plant":
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
             cv2.imwrite(str(filepath), frame)
             logger.info("%s photo saved: %s", cam_name, filepath)
