@@ -1,11 +1,10 @@
 """
-Push code to the Raspberry Pi and set everything up.
-Run this from your laptop while the Pi is on the same network.
+Push code to the Jetson Nano and set everything up.
+Run this from your laptop while the Jetson is on the same network.
 
 Usage:
-    python setup_pi.py
-    python setup_pi.py --host 192.168.1.50
-    python setup_pi.py --host raspberrypi.local --user pi --password raspberry
+    python setup_device.py --host 192.168.1.50
+    python setup_device.py --host 192.168.1.50 --user jetson --password jetson
 """
 
 import argparse
@@ -22,7 +21,7 @@ except ImportError:
     import paramiko
 
 
-PI_PROJECT_DIR = "/home/{user}/VIP-Vertical-Farm"
+PROJECT_DIR = "/home/{user}/VIP-Vertical-Farm"
 VENV_DIR = f"{{project_dir}}/venv"
 SERVICE_NAME = "ai-grower"
 
@@ -41,9 +40,9 @@ SKIP_PATTERNS = ["__pycache__", ".pyc", "data/images/", "data/logs/", "venv/"]
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Set up the Raspberry Pi for VIP Vertical Farm")
-    parser.add_argument("--host", default="raspberrypi.local", help="Pi hostname or IP")
-    parser.add_argument("--user", default="pi", help="SSH username")
+    parser = argparse.ArgumentParser(description="Set up the Jetson Nano for VIP Vertical Farm")
+    parser.add_argument("--host", required=True, help="Jetson hostname or IP address")
+    parser.add_argument("--user", default="jetson", help="SSH username (default: jetson)")
     parser.add_argument("--password", default=None, help="SSH password (will prompt if not given)")
     parser.add_argument("--skip-deps", action="store_true", help="Skip installing dependencies")
     parser.add_argument("--code-only", action="store_true", help="Only push code, skip all setup")
@@ -61,9 +60,9 @@ def connect(host, user, password):
     except Exception as e:
         print(f"Failed to connect: {e}")
         print("\nTroubleshooting:")
-        print("  1. Is the Pi on and connected to the same network?")
-        print("  2. Try using the Pi's IP address instead of hostname")
-        print("  3. Is SSH enabled on the Pi?")
+        print("  1. Is the Jetson on and connected to the same network?")
+        print("  2. Try using the Jetson's IP address instead of hostname")
+        print("  3. Is SSH enabled on the Jetson?")
         sys.exit(1)
 
 
@@ -157,9 +156,15 @@ def setup_python_env(ssh, project_dir):
     run_cmd(ssh, f"{project_dir}/venv/bin/pip install --upgrade pip -q")
     run_cmd(ssh, f"{project_dir}/venv/bin/pip install -r {project_dir}/requirements.txt -q")
 
-    # install RPi.GPIO separately since it only works on Pi
-    print("  Installing RPi.GPIO...")
-    run_cmd(ssh, f"{project_dir}/venv/bin/pip install RPi.GPIO -q", check=False)
+    # install Jetson.GPIO for hardware relay control
+    print("  Installing Jetson.GPIO...")
+    run_cmd(ssh, f"{project_dir}/venv/bin/pip install Jetson.GPIO -q", check=False)
+
+
+def setup_gpio_permissions(ssh, user):
+    print("\n--- Setting up GPIO permissions ---")
+    run_cmd(ssh, f"sudo usermod -aG gpio {user}", check=False)
+    print(f"  Added {user} to gpio group (takes effect on next login)")
 
 
 def create_data_dirs(ssh, project_dir):
@@ -206,7 +211,7 @@ def main():
         password = getpass.getpass(f"SSH password for {args.user}@{args.host}: ")
 
     ssh = connect(args.host, args.user, password)
-    project_dir = PI_PROJECT_DIR.format(user=args.user)
+    project_dir = PROJECT_DIR.format(user=args.user)
 
     # always push code
     push_files(ssh, local_base, project_dir)
@@ -217,6 +222,7 @@ def main():
         if not args.skip_deps:
             install_system_deps(ssh)
             setup_python_env(ssh, project_dir)
+            setup_gpio_permissions(ssh, args.user)
 
         setup_systemd_service(ssh, project_dir, args.user)
         restart_service(ssh)

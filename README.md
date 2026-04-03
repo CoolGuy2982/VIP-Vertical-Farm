@@ -6,13 +6,13 @@ An AI-powered plant growing system that uses Google Gemini to make autonomous gr
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  Raspberry Pi 4 (4GB)                │
+│              NVIDIA Jetson Nano (4GB)                │
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
 │  │ Sensors   │  │ Camera   │  │ Actuators        │  │
-│  │ DHT22     │  │ USB      │  │ Water Pump       │  │
-│  │ Soil Moist│  │ Webcam   │  │ Grow Lights(PWM) │  │
-│  │ Light     │  │          │  │ Fan (PWM)        │  │
+│  │ Dashboard │  │ USB      │  │ Water Pump       │  │
+│  │ (via cam) │  │ Webcam   │  │ Grow Lights      │  │
+│  │           │  │          │  │                   │  │
 │  └─────┬─────┘  └────┬─────┘  └────────┬─────────┘  │
 │        │              │                 │            │
 │  ┌─────▼──────────────▼─────────────────▼─────────┐  │
@@ -74,7 +74,7 @@ The AI then:
 - **Observes**: Analyzes sensor data and the plant image
 - **Assesses**: Compares to ideal conditions for the growth stage
 - **Reasons**: Considers trends, not just current values
-- **Acts**: Uses tools to water, adjust lights, control fan
+- **Acts**: Uses tools to water, adjust lights
 - **Plans**: Decides when to check in next (adaptive scheduling)
 - **Records**: Logs milestones and growth measurements
 
@@ -88,54 +88,62 @@ The AI periodically compresses its own history into a summary — capturing key 
 
 | Component | Purpose | Connection |
 |-----------|---------|------------|
-| Raspberry Pi 4 (4GB) | Main controller | — |
-| DHT22 sensor | Temperature & humidity | GPIO 4 |
-| Capacitive soil moisture sensor | Soil moisture | MCP3008 CH0 |
-| Photoresistor + 10kΩ resistor | Light level | MCP3008 CH1 |
-| MCP3008 ADC | Analog-to-digital conversion | SPI |
-| USB webcam | Plant imaging | USB |
-| 5V relay module | Water pump control | GPIO 17 |
+| NVIDIA Jetson Nano (4GB) | Main controller | — |
+| USB webcam (plant) | Plant imaging | USB |
+| USB webcam (dashboard) | Reads tent sensor display | USB |
+| 5V relay module | Water pump control | GPIO 17 (BCM) |
 | 12V peristaltic pump | Water delivery | Via relay |
-| LED grow light strip (PWM) | Supplemental lighting | GPIO 18 (PWM) |
-| 12V DC fan | Air circulation | GPIO 27 |
+| LED grow light strip | Supplemental lighting | GPIO 27 (BCM) via relay |
 
 ### Wiring Diagram
 
 ```
-DHT22 → GPIO 4 (with 10kΩ pull-up to 3.3V)
-MCP3008 → SPI0 (CLK=SCLK, MISO, MOSI, CS=CE0)
-  CH0 ← Soil moisture sensor
-  CH1 ← Photoresistor voltage divider
-Relay → GPIO 17 → Water pump
-MOSFET → GPIO 18 (PWM) → Grow lights
-MOSFET → GPIO 27 → Fan
+Relay 1 → GPIO 17 (physical pin 11) → Water pump
+Relay 2 → GPIO 27 (physical pin 13) → Grow lights
+Relay VCC → Jetson 5V pin
+Relay GND → Jetson GND pin
+USB Webcam 1 → USB port (plant camera)
+USB Webcam 2 → USB port (dashboard camera)
 ```
+
+Note: The Jetson Nano 40-pin header is compatible with Raspberry Pi GPIO layout. BCM pin numbers are the same.
 
 ## Quick Start
 
-### 1. Clone and install
+### 1. Flash JetPack OS
+
+Flash NVIDIA JetPack to a microSD card using:
+- [NVIDIA SDK Manager](https://developer.nvidia.com/sdk-manager) (recommended)
+- [balenaEtcher](https://etcher.balena.io/) with a JetPack image
+
+### 2. Setup the Jetson
+
+After completing JetPack first-boot setup, run from your laptop:
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/VIP-Vertical-Farm.git
+git clone https://github.com/CoolGuy2982/VIP-Vertical-Farm.git
 cd VIP-Vertical-Farm
-pip install -r requirements.txt
 
-# On Raspberry Pi, also install GPIO libraries:
-pip install adafruit-circuitpython-dht adafruit-circuitpython-mcp3xxx RPi.GPIO
+# One-command setup (clones repo on Jetson, installs deps, creates service)
+python flash_jetson.py --host <jetson-ip> --ssid "YourWiFi" --wifi-password "secret" --embed-env
 ```
 
-### 2. Configure
+Or deploy code updates to an already-configured Jetson:
+
+```bash
+python setup_device.py --host <jetson-ip> --user jetson
+```
+
+### 3. Configure
 
 Edit `config.yaml`:
 - Set your plant species and planting date
 - Adjust GPIO pins if your wiring differs
-- Calibrate the water pump (ml_per_second)
 
-### 3. Set environment variables
-
+Create `.env` on the Jetson:
 ```bash
-export GEMINI_API_KEY="your-gemini-api-key"
-export API_SECRET_KEY="your-api-secret"
+GEMINI_API_KEY=your-gemini-api-key
+API_SECRET_KEY=your-api-secret
 ```
 
 ### 4. Run
@@ -145,6 +153,12 @@ python -m src.main
 ```
 
 The AI grower starts immediately, and the API server runs on port 8080.
+
+### 5. Test hardware
+
+```bash
+python test_device.py --host <jetson-ip> --test all
+```
 
 ## API Endpoints
 
@@ -158,22 +172,24 @@ The AI grower starts immediately, and the API server runs on port 8080.
 | GET | `/api/growth/summary` | AI growth summary |
 | GET | `/api/camera/latest` | Latest plant photo |
 | POST | `/api/camera/capture` | Take a photo now |
-| POST | `/api/control/water` | Manual watering |
-| POST | `/api/control/lights` | Set grow lights |
-| POST | `/api/control/fan` | Set fan speed |
+| POST | `/api/control/pump` | Manual watering |
+| POST | `/api/control/lights/on` | Turn on grow lights |
+| POST | `/api/control/lights/off` | Turn off grow lights |
 | POST | `/api/control/checkin` | Force AI check-in |
 
 ## AI Tools
 
-The AI has access to 11 tools:
+The AI has access to these tools:
 
 | Tool | Description |
 |------|-------------|
-| `read_sensors` | Read temperature, humidity, soil moisture, light |
-| `water_plant(ml)` | Dispense precise amount of water |
-| `set_grow_lights(brightness, hours)` | Control grow lights with auto-off |
-| `set_fan(speed)` | Control ventilation fan |
-| `capture_image` | Take a plant photo |
+| `capture_plant` | Take a plant photo |
+| `capture_dashboard` | Take a dashboard photo |
+| `report_sensors` | Log extracted sensor values |
+| `run_pump(seconds)` | Run water pump |
+| `turn_on_lights(minutes)` | Control grow lights with auto-off |
+| `turn_off_lights` | Turn off grow lights |
+| `observe_in(minutes)` | Schedule follow-up observation |
 | `schedule_checkin(minutes)` | Set next check-in time |
 | `log_milestone(description)` | Record growth milestone |
 | `get_growth_history` | View past milestones |
@@ -183,10 +199,10 @@ The AI has access to 11 tools:
 
 ## Development
 
-On non-Pi platforms, sensors and actuators run in simulation mode — you can develop and test the AI logic without hardware.
+On non-Jetson platforms, actuators run in simulation mode — you can develop and test the AI logic without hardware.
 
 ```bash
-# Run in dev mode (simulated sensors)
+# Run in dev mode (simulated actuators)
 python -m src.main
 
 # The API will be at http://localhost:8080

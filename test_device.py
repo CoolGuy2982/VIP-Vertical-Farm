@@ -1,14 +1,13 @@
 """
-Test all hardware functions on the Raspberry Pi remotely.
-Run this from your laptop while the Pi is on the same network.
+Test all hardware functions on the Jetson Nano remotely.
+Run this from your laptop while the Jetson is on the same network.
 
 Usage:
-    python test_pi.py
-    python test_pi.py --host 192.168.1.50
-    python test_pi.py --test cameras
-    python test_pi.py --test relays
-    python test_pi.py --test gemini
-    python test_pi.py --test all
+    python test_device.py --host 192.168.1.50
+    python test_device.py --host 192.168.1.50 --test cameras
+    python test_device.py --host 192.168.1.50 --test relays
+    python test_device.py --test gemini
+    python test_device.py --test all
 """
 
 import argparse
@@ -25,13 +24,13 @@ except ImportError:
     import paramiko
 
 
-PI_PROJECT_DIR = "/home/{user}/VIP-Vertical-Farm"
+PROJECT_DIR = "/home/{user}/VIP-Vertical-Farm"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Test Pi hardware remotely")
-    parser.add_argument("--host", default="raspberrypi.local", help="Pi hostname or IP")
-    parser.add_argument("--user", default="pi", help="SSH username")
+    parser = argparse.ArgumentParser(description="Test Jetson Nano hardware remotely")
+    parser.add_argument("--host", required=True, help="Jetson hostname or IP address")
+    parser.add_argument("--user", default="jetson", help="SSH username (default: jetson)")
     parser.add_argument("--password", default=None, help="SSH password")
     parser.add_argument("--test", default="all",
                         choices=["all", "cameras", "relays", "gemini", "api", "firebase"],
@@ -52,8 +51,8 @@ def connect(host, user, password):
         sys.exit(1)
 
 
-def run_pi_script(ssh, project_dir, script, timeout=30):
-    """Run a Python script on the Pi inside the venv."""
+def run_device_script(ssh, project_dir, script, timeout=30):
+    """Run a Python script on the Jetson inside the venv."""
     cmd = f"cd {project_dir} && {project_dir}/venv/bin/python3 -c \"{script}\""
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
     exit_code = stdout.channel.recv_exit_status()
@@ -99,7 +98,7 @@ for i in range(4):
 print(json.dumps(results))
 """.replace("{project_dir}", project_dir).replace("\n", "; ").strip("; ")
 
-    out, err, code = run_pi_script(ssh, project_dir, script)
+    out, err, code = run_device_script(ssh, project_dir, script)
 
     if code != 0:
         print(f"  FAILED: {err}")
@@ -153,14 +152,14 @@ def test_relays(ssh, project_dir):
     print("  >>> Watch/listen for the relay click <<<")
 
     script = """
-import RPi.GPIO as GPIO; import time
+import Jetson.GPIO as GPIO; import time
 GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
 GPIO.setup(17, GPIO.OUT)
 print('pump relay ON'); GPIO.output(17, GPIO.HIGH); time.sleep(2)
 print('pump relay OFF'); GPIO.output(17, GPIO.LOW)
 GPIO.cleanup(17); print('pump test done')
 """
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
         print(f"  Pump relay: OK")
         for line in out.split("\n"):
@@ -175,14 +174,14 @@ GPIO.cleanup(17); print('pump test done')
     print("  >>> Watch/listen for the relay click <<<")
 
     script = """
-import RPi.GPIO as GPIO; import time
+import Jetson.GPIO as GPIO; import time
 GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
 GPIO.setup(27, GPIO.OUT)
 print('light relay ON'); GPIO.output(27, GPIO.HIGH); time.sleep(2)
 print('light relay OFF'); GPIO.output(27, GPIO.LOW)
 GPIO.cleanup(27); print('light test done')
 """
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
         print(f"  Light relay: OK")
         for line in out.split("\n"):
@@ -195,7 +194,8 @@ GPIO.cleanup(27); print('light test done')
     print("    - Check the power supply to the pump/light")
     print("  If nothing happened at all:")
     print("    - Check GPIO wiring (pin 11 for pump, pin 13 for light)")
-    print("    - Check relay VCC is connected to Pi 5V")
+    print("    - Check relay VCC is connected to Jetson 5V")
+    print("    - Make sure your user is in the gpio group: sudo usermod -aG gpio $USER")
 
     return True
 
@@ -205,14 +205,14 @@ def test_relays_inverted(ssh, project_dir):
     print("\n  Testing if relays are INVERTED (active-low)...")
 
     script = """
-import RPi.GPIO as GPIO; import time
+import Jetson.GPIO as GPIO; import time
 GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
 GPIO.setup(17, GPIO.OUT)
 print('trying LOW signal'); GPIO.output(17, GPIO.LOW); time.sleep(2)
 print('back to HIGH'); GPIO.output(17, GPIO.HIGH)
 GPIO.cleanup(17); print('inverted test done')
 """
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
         for line in out.split("\n"):
             print(f"    {line}")
@@ -236,7 +236,7 @@ r = client.interactions.create(model='gemini-3-flash-preview', input='Say hello 
 print(f'Response: {r.outputs[-1].text}')
 print('Gemini connection OK')
 """
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "), timeout=30)
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "), timeout=30)
     for line in out.split("\n"):
         print(f"  {line}")
     if code != 0:
@@ -261,7 +261,7 @@ except Exception as e:
     print(f'API not reachable: {e}')
     print('Is the service running? Check: sudo systemctl status ai-grower')
 """
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     for line in out.split("\n"):
         print(f"  {line}")
     return code == 0
@@ -293,7 +293,7 @@ db.collection('test').document('ping').delete()
 print('Firebase connection OK')
 """.replace("{project_dir}", project_dir)
 
-    out, err, code = run_pi_script(ssh, project_dir, script.replace("\n", "; ").strip("; "), timeout=30)
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "), timeout=30)
     for line in out.split("\n"):
         print(f"  {line}")
     if code != 0:
@@ -304,7 +304,7 @@ print('Firebase connection OK')
 
 def main():
     args = parse_args()
-    project_dir = PI_PROJECT_DIR.format(user=args.user)
+    project_dir = PROJECT_DIR.format(user=args.user)
 
     password = args.password
     if not password:

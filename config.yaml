@@ -30,7 +30,7 @@ plant:
       ideal_soil_moisture_pct: [35, 55]
       light_hours: 14
 
-# GPIO pin numbers (BCM)
+# GPIO pin numbers (BCM — Jetson Nano 40-pin header)
 gpio:
   water_pump_pin: 17    # Relay 1 → water pump
   grow_light_pin: 27    # Relay 2 → grow light
@@ -80,7 +80,7 @@ firebase:
   enabled: true
   credentials_path: "firebase-credentials.json"
   storage_bucket: "vip-farm-35099.firebasestorage.app"
-  device_id: "pi-grower-01"
+  device_id: "jetson-grower-01"
 
 # Alerts
 alerts:

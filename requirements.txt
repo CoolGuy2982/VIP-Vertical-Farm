@@ -20,5 +20,5 @@ Pillow>=10.0
 # Firebase cloud backup
 firebase-admin>=6.0
 
-# Raspberry Pi only (install on Pi for relay control)
-# RPi.GPIO>=0.7.0
+# Jetson Nano only (installed by setup script on the device)
+Jetson.GPIO>=2.0.0

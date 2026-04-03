@@ -6,11 +6,11 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 try:
-    import RPi.GPIO as GPIO
-    PI_AVAILABLE = True
+    import Jetson.GPIO as GPIO
+    GPIO_AVAILABLE = True
 except ImportError:
-    PI_AVAILABLE = False
-    logger.warning("RPi.GPIO not found, running in sim mode")
+    GPIO_AVAILABLE = False
+    logger.warning("Jetson.GPIO not found, running in sim mode")
 
 
 class Actuators:
@@ -27,7 +27,7 @@ class Actuators:
         self._total_pump_seconds = 0.0
         self._action_log: list[dict] = []
 
-        if PI_AVAILABLE:
+        if GPIO_AVAILABLE:
             self._init_gpio()
         else:
             self._simulated = True
