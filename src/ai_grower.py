@@ -99,7 +99,17 @@ class AIGrower:
             logger.info("[%s] Day %d - %s", trigger_type.upper(), day,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+            # Turn on dashboard backlight for visual sensor extraction
+            logger.info("Enabling dashboard backlight...")
+            self.actuators.turn_on_dashboard()
+            time.sleep(5)
+
             images = self.camera.capture_both(trigger_type)
+            
+            # Turn off dashboard backlight
+            self.actuators.turn_off_dashboard()
+            logger.info("Dashboard backlight disabled")
+
             plant_image = images.get("plant")
             dashboard_image = images.get("dashboard")
 

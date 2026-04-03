@@ -34,6 +34,7 @@ plant:
 gpio:
   water_pump_pin: 17    # Relay 1 → water pump
   grow_light_pin: 27    # Relay 2 → grow light
+  dashboard_relay_pin: 22 # Relay 3 → dashboard backlight
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
 

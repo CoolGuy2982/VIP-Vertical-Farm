@@ -189,7 +189,29 @@ GPIO.cleanup(27); print('light test done')
     else:
         print(f"  Light relay: FAILED - {err}")
 
-    print("\n  If the relays clicked but pump/light didn't turn on:")
+    input("\n  Press Enter to test the DASHBOARD relay next...")
+
+    # test dashboard relay
+    print("  Testing DASHBOARD relay (GPIO 22) - 2 second pulse...")
+    print("  >>> Watch/listen for the relay click <<<")
+
+    script = """
+import Jetson.GPIO as GPIO; import time
+GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
+GPIO.setup(22, GPIO.OUT)
+print('dashboard relay ON'); GPIO.output(22, GPIO.HIGH); time.sleep(2)
+print('dashboard relay OFF'); GPIO.output(22, GPIO.LOW)
+GPIO.cleanup(22); print('dashboard test done')
+"""
+    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
+    if code == 0:
+        print(f"  Dashboard relay: OK")
+        for line in out.split("\n"):
+            print(f"    {line}")
+    else:
+        print(f"  Dashboard relay: FAILED - {err}")
+
+    print("\n  If the relays clicked but pump/light/dashboard didn't turn on:")
     print("    - Check that you used the NO (normally open) terminal")
     print("    - Check the power supply to the pump/light")
     print("  If nothing happened at all:")
