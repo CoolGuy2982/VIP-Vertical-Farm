@@ -7,6 +7,10 @@ import Jetson.GPIO as GPIO
 
 logger = logging.getLogger(__name__)
 
+# Active-Low Logic Configuration
+ON_STATE = GPIO.LOW
+OFF_STATE = GPIO.HIGH
+
 
 class Actuators:
     def __init__(self, config: dict):
@@ -29,13 +33,17 @@ class Actuators:
     def _init_gpio(self):
         GPIO.setmode(GPIO.BOARD)
         GPIO.setwarnings(False)
+        
+        # Setup pins as output with initial OFF state
         GPIO.setup(self.pump_pin, GPIO.OUT)
         GPIO.setup(self.light_pin, GPIO.OUT)
         GPIO.setup(self.dash_pin, GPIO.OUT)
-        GPIO.output(self.pump_pin, GPIO.LOW)
-        GPIO.output(self.light_pin, GPIO.LOW)
-        GPIO.output(self.dash_pin, GPIO.LOW)
-        logger.info("GPIO initialized (BOARD numbering - Jetson Nano 40-pin header)")
+        
+        GPIO.output(self.pump_pin, OFF_STATE)
+        GPIO.output(self.light_pin, OFF_STATE)
+        GPIO.output(self.dash_pin, OFF_STATE)
+        
+        logger.info("GPIO initialized (Active-Low, BOARD numbering)")
 
     def run_pump(self, seconds: float) -> dict:
         pump_config = self.config.get("water_pump", {})
@@ -51,9 +59,9 @@ class Actuators:
 
         logger.info("pump on for %.1fs", seconds)
         self._pump_running = True
-        GPIO.output(self.pump_pin, GPIO.HIGH)
+        GPIO.output(self.pump_pin, ON_STATE)
         time.sleep(seconds)
-        GPIO.output(self.pump_pin, GPIO.LOW)
+        GPIO.output(self.pump_pin, OFF_STATE)
         self._pump_running = False
 
         self._total_pump_seconds += seconds
@@ -68,7 +76,7 @@ class Actuators:
         if self._light_timer and self._light_timer.is_alive():
             self._light_timer.cancel()
 
-        GPIO.output(self.light_pin, GPIO.HIGH)
+        GPIO.output(self.light_pin, ON_STATE)
         self._light_on = True
         self._light_timer = threading.Timer(minutes * 60, self._lights_auto_off)
         self._light_timer.daemon = True
@@ -87,21 +95,21 @@ class Actuators:
         if self._light_timer and self._light_timer.is_alive():
             self._light_timer.cancel()
 
-        GPIO.output(self.light_pin, GPIO.LOW)
+        GPIO.output(self.light_pin, OFF_STATE)
         self._light_on = False
         result = {"action": "turn_off_lights", "timestamp": datetime.now().isoformat()}
         self._log_action(result)
         return result
 
     def turn_on_dashboard(self) -> dict:
-        GPIO.output(self.dash_pin, GPIO.HIGH)
+        GPIO.output(self.dash_pin, ON_STATE)
         self._dash_on = True
         result = {"action": "turn_on_dashboard", "timestamp": datetime.now().isoformat()}
         self._log_action(result)
         return result
 
     def turn_off_dashboard(self) -> dict:
-        GPIO.output(self.dash_pin, GPIO.LOW)
+        GPIO.output(self.dash_pin, OFF_STATE)
         self._dash_on = False
         result = {"action": "turn_off_dashboard", "timestamp": datetime.now().isoformat()}
         self._log_action(result)
@@ -109,7 +117,7 @@ class Actuators:
 
     def _lights_auto_off(self):
         logger.info("lights auto-off timer fired")
-        GPIO.output(self.light_pin, GPIO.LOW)
+        GPIO.output(self.light_pin, OFF_STATE)
         self._light_on = False
 
     def get_status(self) -> dict:
@@ -131,7 +139,7 @@ class Actuators:
     def cleanup(self):
         if self._light_timer and self._light_timer.is_alive():
             self._light_timer.cancel()
-        GPIO.output(self.pump_pin, GPIO.LOW)
-        GPIO.output(self.light_pin, GPIO.LOW)
-        GPIO.output(self.dash_pin, GPIO.LOW)
+        GPIO.output(self.pump_pin, OFF_STATE)
+        GPIO.output(self.light_pin, OFF_STATE)
+        GPIO.output(self.dash_pin, OFF_STATE)
         GPIO.cleanup()
