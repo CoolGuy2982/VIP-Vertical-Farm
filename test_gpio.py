@@ -3,8 +3,8 @@ Run on the Jetson to test relay wiring.
 
     python3 test_gpio.py
 
-Automatically pulses each relay pin HIGH and LOW.
-Watch the relay LEDs and listen for clicks.
+Pins start HIGH. Script then pulses each pin LOW then HIGH so you
+hear the transition clicks and can tell which state activates your relay.
 """
 
 import time
@@ -20,28 +20,27 @@ PINS = {"LIGHT": 15, "PUMP": 11}
 
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
+
+# Start HIGH so relay is in a known OFF state (for active-low modules)
 for pin in PINS.values():
     GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, GPIO.LOW)
+    GPIO.output(pin, GPIO.HIGH)
 
-print("Starting relay test. Watch for relay LED / listen for clicks.\n")
+print("All pins HIGH. Starting test in 2 seconds...\n")
+time.sleep(2)
 
 for name, pin in PINS.items():
     print(f"=== {name} (BOARD pin {pin}) ===")
 
-    print(f"  LOW  for 3s  (active-LOW relay should click ON now)")
+    print(f"  >>> Going LOW now (active-LOW relay clicks ON here) <<<")
     GPIO.output(pin, GPIO.LOW)
     time.sleep(3)
-    GPIO.output(pin, GPIO.LOW)
 
-    print(f"  HIGH for 3s  (active-HIGH relay should click ON now)")
+    print(f"  >>> Going HIGH now (active-HIGH relay clicks ON here) <<<")
     GPIO.output(pin, GPIO.HIGH)
     time.sleep(3)
-    GPIO.output(pin, GPIO.HIGH)
 
-    print(f"  back to LOW\n")
-    GPIO.output(pin, GPIO.LOW)
-    time.sleep(1)
+    print(f"  Done with {name}\n")
 
 GPIO.cleanup()
-print("Done. Tell me: did the relay click on LOW or HIGH?")
+print("Test complete. Tell me: did it click on LOW or HIGH?")
