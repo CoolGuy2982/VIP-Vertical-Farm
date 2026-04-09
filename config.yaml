@@ -40,7 +40,7 @@ hardware_specs:
 # Signal Pins: Light = 15, Pump = 11
 gpio:
   water_pump_pin: 11    # Relay 1 → water pump (BOARD Pin 11)
-  grow_light_pin: 15    # Relay 2 → grow light (BOARD Pin 15)
+  grow_light_pin: 13    # Relay 2 → grow light (BOARD Pin 13)
   dashboard_relay_pin: 22 # Not used (dashboard always on)
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
