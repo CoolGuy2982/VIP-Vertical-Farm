@@ -3,72 +3,45 @@ Run on the Jetson to test relay wiring.
 
     python3 test_gpio.py
 
-Uses Linux sysfs GPIO directly (bypasses Jetson.GPIO library entirely).
-Linux GPIO numbers from the Jetson Nano pinout:
-  Physical pin 11 → Linux GPIO 50
-  Physical pin 15 → Linux GPIO 194
+Automatically pulses each relay pin HIGH and LOW.
+Watch the relay LEDs and listen for clicks.
 """
 
 import time
-import os
 import sys
 
-PINS = {
-    "PUMP  (physical pin 11)": 50,
-    "LIGHT (physical pin 15)": 194,
-}
+try:
+    import Jetson.GPIO as GPIO
+except ImportError:
+    print("ERROR: Jetson.GPIO not found")
+    sys.exit(1)
 
-def gpio_write(gpio_num, value):
-    with open(f"/sys/class/gpio/gpio{gpio_num}/value", "w") as f:
-        f.write(str(value))
+PINS = {"LIGHT": 15, "PUMP": 11}
 
-def gpio_setup(gpio_num):
-    export_path = f"/sys/class/gpio/gpio{gpio_num}"
-    if not os.path.exists(export_path):
-        with open("/sys/class/gpio/export", "w") as f:
-            f.write(str(gpio_num))
-        time.sleep(0.1)
-    with open(f"{export_path}/direction", "w") as f:
-        f.write("out")
-    gpio_write(gpio_num, 1)  # start HIGH
+GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
+for pin in PINS.values():
+    GPIO.setup(pin, GPIO.OUT)
+    GPIO.output(pin, GPIO.LOW)
 
-def gpio_cleanup(gpio_num):
-    gpio_write(gpio_num, 1)  # leave HIGH (relay off)
-    with open("/sys/class/gpio/unexport", "w") as f:
-        f.write(str(gpio_num))
+print("Starting relay test. Watch for relay LED / listen for clicks.\n")
 
-print("Setting up GPIO via sysfs (Linux GPIO numbers)...")
-for name, gpio_num in PINS.items():
-    try:
-        gpio_setup(gpio_num)
-        print(f"  {name} → GPIO {gpio_num} ready")
-    except PermissionError:
-        print(f"  ERROR: Permission denied. Run with: sudo python3 test_gpio.py")
-        sys.exit(1)
-    except Exception as e:
-        print(f"  ERROR on GPIO {gpio_num}: {e}")
-        sys.exit(1)
+for name, pin in PINS.items():
+    print(f"=== {name} (BOARD pin {pin}) ===")
 
-print("\nAll pins HIGH. Starting test in 2 seconds...\n")
-time.sleep(2)
-
-for name, gpio_num in PINS.items():
-    print(f"=== {name} (Linux GPIO {gpio_num}) ===")
-
-    print(f"  >>> Going LOW now  — listen for relay click <<<")
-    gpio_write(gpio_num, 0)
+    print(f"  LOW  for 3s  (active-LOW relay should click ON now)")
+    GPIO.output(pin, GPIO.LOW)
     time.sleep(3)
+    GPIO.output(pin, GPIO.LOW)
 
-    print(f"  >>> Going HIGH now — listen for relay click <<<")
-    gpio_write(gpio_num, 1)
+    print(f"  HIGH for 3s  (active-HIGH relay should click ON now)")
+    GPIO.output(pin, GPIO.HIGH)
     time.sleep(3)
+    GPIO.output(pin, GPIO.HIGH)
 
-    print(f"  Done with {name}\n")
+    print(f"  back to LOW\n")
+    GPIO.output(pin, GPIO.LOW)
+    time.sleep(1)
 
-for name, gpio_num in PINS.items():
-    try:
-        gpio_cleanup(gpio_num)
-    except Exception:
-        pass
-
-print("Test complete. Tell me: did it click on LOW or HIGH?")
+GPIO.cleanup()
+print("Done. Tell me: did the relay click on LOW or HIGH?")
