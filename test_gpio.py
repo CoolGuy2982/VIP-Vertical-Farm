@@ -18,24 +18,29 @@ PINS = {"LIGHT": 13, "PUMP": 11}
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(True)
 
-for pin in PINS.values():
+print("Setting up pins...")
+for name, pin in PINS.items():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
+    state = GPIO.input(pin)
+    print(f"  {name} pin {pin} — set HIGH, reads back: {state} (expect 1)")
 
-print("All pins HIGH. Starting test in 2 seconds...\n")
+print("\nAll pins HIGH. Starting test in 2 seconds...\n")
 time.sleep(2)
 
 for name, pin in PINS.items():
     print(f"=== {name} (BOARD pin {pin}) ===")
 
-    print(f"  >>> Going LOW now  — listen for relay click <<<")
     GPIO.output(pin, GPIO.LOW)
+    state = GPIO.input(pin)
+    print(f"  Set LOW  — reads back: {state} (expect 0) — listen for click...")
     time.sleep(3)
 
-    print(f"  >>> Going HIGH now — listen for relay click <<<")
     GPIO.output(pin, GPIO.HIGH)
+    state = GPIO.input(pin)
+    print(f"  Set HIGH — reads back: {state} (expect 1) — listen for click...")
     time.sleep(3)
 
-    print(f"  Done with {name}\n")
+    print()
 
 GPIO.cleanup()
-print("Test complete. Tell me: did it click on LOW or HIGH?")
+print("Done. Share the readback values above.")
