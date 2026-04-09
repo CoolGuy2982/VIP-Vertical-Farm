@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(ls c:/Users/omkar/OneDrive/Documents/GitHub/VIP-Vertical-Farm/*.py)"
     ]
   }
 }

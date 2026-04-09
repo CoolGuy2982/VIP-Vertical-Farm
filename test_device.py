@@ -51,13 +51,17 @@ def connect(host, user, password):
         sys.exit(1)
 
 
-def run_device_script(ssh, project_dir, script, timeout=30):
+def run_device_script(ssh, project_dir, script, timeout=30, use_sudo=False):
     """Run a Python script on the Jetson inside the venv."""
-    cmd = f"cd {project_dir} && {project_dir}/venv/bin/python3 -c \"{script}\""
+    python = f"{project_dir}/venv/bin/python3"
+    if use_sudo:
+        cmd = f"cd {project_dir} && sudo {python} -c \"{script}\""
+    else:
+        cmd = f"cd {project_dir} && {python} -c \"{script}\""
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
-    exit_code = stdout.channel.recv_exit_status()
     out = stdout.read().decode().strip()
     err = stderr.read().decode().strip()
+    exit_code = stdout.channel.recv_exit_status()
     return out, err, exit_code
 
 
@@ -142,104 +146,73 @@ print(json.dumps(results))
         return False
 
 
+def _run_relay_test(ssh, project_dir, name, pin):
+    """Pulse one relay pin and print full output + any errors."""
+    script = (
+        f"import Jetson.GPIO as GPIO; import time; "
+        f"GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False); "
+        f"GPIO.setup({pin}, GPIO.OUT); GPIO.output({pin}, GPIO.HIGH); "
+        f"print('pin {pin} set HIGH (relay OFF)'); time.sleep(0.2); "
+        f"print('{name} relay ON'); GPIO.output({pin}, GPIO.LOW); time.sleep(3); "
+        f"print('{name} relay OFF'); GPIO.output({pin}, GPIO.HIGH); "
+        f"GPIO.cleanup({pin}); print('done')"
+    )
+    out, err, code = run_device_script(ssh, project_dir, script, timeout=15, use_sudo=True)
+    print(f"  exit code : {code}")
+    if out:
+        for line in out.split("\n"):
+            print(f"  out: {line}")
+    if err:
+        for line in err.split("\n"):
+            print(f"  ERR: {line}")
+    return code == 0
+
+
 def test_relays(ssh, project_dir):
     print("=" * 50)
     print("TEST: Relay modules (pump + lights)")
+    print("  Using BOARD pin numbering, active-low logic (LOW = ON)")
+    print("  Running with sudo so GPIO access is guaranteed")
     print("=" * 50)
 
-    # test pump relay
-    print("\n  Testing PUMP relay (BOARD pin 11) - 2 second pulse...")
-    print("  >>> Watch/listen for the relay click <<<")
+    for name, pin in [("PUMP", 11), ("LIGHT", 7), ("DASHBOARD", 22)]:
+        input(f"\n  Press Enter to pulse {name} relay (BOARD pin {pin}) for 3s...")
+        print(f"  >>> Watch/listen for the relay click NOW <<<")
+        ok = _run_relay_test(ssh, project_dir, name, pin)
+        if ok:
+            print(f"  {name}: script ran OK")
+        else:
+            print(f"  {name}: FAILED (see ERR above)")
 
-    script = """
-import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
-GPIO.setup(11, GPIO.OUT, initial=GPIO.HIGH)
-print('pump relay ON'); GPIO.output(11, GPIO.LOW); time.sleep(2)
-print('pump relay OFF'); GPIO.output(11, GPIO.HIGH)
-GPIO.cleanup(11); print('pump test done')
-"""
-    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
-    if code == 0:
-        print(f"  Pump relay: OK")
-        for line in out.split("\n"):
-            print(f"    {line}")
-    else:
-        print(f"  Pump relay: FAILED - {err}")
-
-    input("\n  Press Enter to test the LIGHT relay next...")
-
-    # test light relay
-    print("  Testing LIGHT relay (BOARD pin 7) - 2 second pulse...")
-    print("  >>> Watch/listen for the relay click <<<")
-
-    script = """
-import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
-GPIO.setup(7, GPIO.OUT, initial=GPIO.HIGH)
-print('light relay ON'); GPIO.output(7, GPIO.LOW); time.sleep(2)
-print('light relay OFF'); GPIO.output(7, GPIO.HIGH)
-GPIO.cleanup(7); print('light test done')
-"""
-    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
-    if code == 0:
-        print(f"  Light relay: OK")
-        for line in out.split("\n"):
-            print(f"    {line}")
-    else:
-        print(f"  Light relay: FAILED - {err}")
-
-    input("\n  Press Enter to test the DASHBOARD relay next...")
-
-    # test dashboard relay
-    print("  Testing DASHBOARD relay (BOARD pin 22) - 2 second pulse...")
-    print("  >>> Watch/listen for the relay click <<<")
-
-    script = """
-import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
-GPIO.setup(22, GPIO.OUT, initial=GPIO.HIGH)
-print('dashboard relay ON'); GPIO.output(22, GPIO.LOW); time.sleep(2)
-print('dashboard relay OFF'); GPIO.output(22, GPIO.HIGH)
-GPIO.cleanup(22); print('dashboard test done')
-"""
-    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
-    if code == 0:
-        print(f"  Dashboard relay: OK")
-        for line in out.split("\n"):
-            print(f"    {line}")
-    else:
-        print(f"  Dashboard relay: FAILED - {err}")
-
-    print("\n  If the relays clicked but pump/light/dashboard didn't turn on:")
-    print("    - Check that you used the NO (normally open) terminal")
-    print("    - Check the power supply to the pump/light")
-    print("  If nothing happened at all:")
-    print("    - Check GPIO wiring (BOARD pin 11 for pump, pin 7 for light)")
-    print("    - Check relay VCC is connected to Jetson 3.3V (pin 1)")
-    print("    - Make sure your user is in the gpio group: sudo usermod -aG gpio $USER")
+    print("\n  Troubleshooting:")
+    print("    No click at all   → check wiring: BOARD pin 7 (light), 11 (pump)")
+    print("                        VCC → Jetson pin 1 (3.3V), GND → pin 6")
+    print("    Click but no load → check NO terminal on relay, check load power supply")
+    print("    Permission error  → sudo usermod -aG gpio $USER  then reboot")
 
     return True
 
 
 def test_relays_inverted(ssh, project_dir):
     """Test if relays are active-low (inverted)."""
-    print("\n  Testing if relays are INVERTED (active-low)...")
-
-    script = """
-import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
-GPIO.setup(11, GPIO.OUT, initial=GPIO.HIGH)
-print('trying LOW signal'); GPIO.output(11, GPIO.LOW); time.sleep(2)
-print('back to HIGH'); GPIO.output(11, GPIO.HIGH)
-GPIO.cleanup(11); print('inverted test done')
-"""
-    out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
-    if code == 0:
+    print("\n  Testing if relays are INVERTED (active-low) on pump pin (BOARD 11)...")
+    script = (
+        "import Jetson.GPIO as GPIO; import time; "
+        "GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False); "
+        "GPIO.setup(11, GPIO.OUT); GPIO.output(11, GPIO.HIGH); time.sleep(0.2); "
+        "print('trying LOW'); GPIO.output(11, GPIO.LOW); time.sleep(2); "
+        "print('back to HIGH'); GPIO.output(11, GPIO.HIGH); "
+        "GPIO.cleanup(11); print('done')"
+    )
+    out, err, code = run_device_script(ssh, project_dir, script, timeout=15, use_sudo=True)
+    if out:
         for line in out.split("\n"):
             print(f"    {line}")
-        print("\n  Did the relay click THIS time but not before?")
-        print("  If yes: your relay is active-low. Tell me and I'll flip the code.")
+    if err:
+        for line in err.split("\n"):
+            print(f"    ERR: {line}")
+    print("\n  Did the relay click when 'trying LOW' printed?")
+    print("  If yes: relay is active-low (correct, matches actuators.py).")
 
 
 def test_gemini(ssh, project_dir):
