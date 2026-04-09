@@ -148,16 +148,16 @@ def test_relays(ssh, project_dir):
     print("=" * 50)
 
     # test pump relay
-    print("\n  Testing PUMP relay (GPIO 17) - 2 second pulse...")
+    print("\n  Testing PUMP relay (BOARD pin 11) - 2 second pulse...")
     print("  >>> Watch/listen for the relay click <<<")
 
     script = """
 import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-GPIO.setup(17, GPIO.OUT)
-print('pump relay ON'); GPIO.output(17, GPIO.HIGH); time.sleep(2)
-print('pump relay OFF'); GPIO.output(17, GPIO.LOW)
-GPIO.cleanup(17); print('pump test done')
+GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
+GPIO.setup(11, GPIO.OUT, initial=GPIO.HIGH)
+print('pump relay ON'); GPIO.output(11, GPIO.LOW); time.sleep(2)
+print('pump relay OFF'); GPIO.output(11, GPIO.HIGH)
+GPIO.cleanup(11); print('pump test done')
 """
     out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
@@ -170,16 +170,16 @@ GPIO.cleanup(17); print('pump test done')
     input("\n  Press Enter to test the LIGHT relay next...")
 
     # test light relay
-    print("  Testing LIGHT relay (GPIO 27) - 2 second pulse...")
+    print("  Testing LIGHT relay (BOARD pin 7) - 2 second pulse...")
     print("  >>> Watch/listen for the relay click <<<")
 
     script = """
 import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-GPIO.setup(27, GPIO.OUT)
-print('light relay ON'); GPIO.output(27, GPIO.HIGH); time.sleep(2)
-print('light relay OFF'); GPIO.output(27, GPIO.LOW)
-GPIO.cleanup(27); print('light test done')
+GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
+GPIO.setup(7, GPIO.OUT, initial=GPIO.HIGH)
+print('light relay ON'); GPIO.output(7, GPIO.LOW); time.sleep(2)
+print('light relay OFF'); GPIO.output(7, GPIO.HIGH)
+GPIO.cleanup(7); print('light test done')
 """
     out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
@@ -192,15 +192,15 @@ GPIO.cleanup(27); print('light test done')
     input("\n  Press Enter to test the DASHBOARD relay next...")
 
     # test dashboard relay
-    print("  Testing DASHBOARD relay (GPIO 22) - 2 second pulse...")
+    print("  Testing DASHBOARD relay (BOARD pin 22) - 2 second pulse...")
     print("  >>> Watch/listen for the relay click <<<")
 
     script = """
 import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-GPIO.setup(22, GPIO.OUT)
-print('dashboard relay ON'); GPIO.output(22, GPIO.HIGH); time.sleep(2)
-print('dashboard relay OFF'); GPIO.output(22, GPIO.LOW)
+GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
+GPIO.setup(22, GPIO.OUT, initial=GPIO.HIGH)
+print('dashboard relay ON'); GPIO.output(22, GPIO.LOW); time.sleep(2)
+print('dashboard relay OFF'); GPIO.output(22, GPIO.HIGH)
 GPIO.cleanup(22); print('dashboard test done')
 """
     out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
@@ -215,8 +215,8 @@ GPIO.cleanup(22); print('dashboard test done')
     print("    - Check that you used the NO (normally open) terminal")
     print("    - Check the power supply to the pump/light")
     print("  If nothing happened at all:")
-    print("    - Check GPIO wiring (pin 11 for pump, pin 13 for light)")
-    print("    - Check relay VCC is connected to Jetson 5V")
+    print("    - Check GPIO wiring (BOARD pin 11 for pump, pin 7 for light)")
+    print("    - Check relay VCC is connected to Jetson 3.3V (pin 1)")
     print("    - Make sure your user is in the gpio group: sudo usermod -aG gpio $USER")
 
     return True
@@ -228,11 +228,11 @@ def test_relays_inverted(ssh, project_dir):
 
     script = """
 import Jetson.GPIO as GPIO; import time
-GPIO.setmode(GPIO.BCM); GPIO.setwarnings(False)
-GPIO.setup(17, GPIO.OUT)
-print('trying LOW signal'); GPIO.output(17, GPIO.LOW); time.sleep(2)
-print('back to HIGH'); GPIO.output(17, GPIO.HIGH)
-GPIO.cleanup(17); print('inverted test done')
+GPIO.setmode(GPIO.BOARD); GPIO.setwarnings(False)
+GPIO.setup(11, GPIO.OUT, initial=GPIO.HIGH)
+print('trying LOW signal'); GPIO.output(11, GPIO.LOW); time.sleep(2)
+print('back to HIGH'); GPIO.output(11, GPIO.HIGH)
+GPIO.cleanup(11); print('inverted test done')
 """
     out, err, code = run_device_script(ssh, project_dir, script.replace("\n", "; ").strip("; "))
     if code == 0:
