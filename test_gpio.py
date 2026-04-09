@@ -1,48 +1,10 @@
-"""
-Run on the Jetson to test relay wiring.
-
-    python3 test_gpio.py
-
-Automatically pulses each relay pin HIGH and LOW.
-Watch the relay LEDs and listen for clicks.
-"""
-
+import Jetson.GPIO as GPIO
 import time
-import sys
-
-try:
-    import Jetson.GPIO as GPIO
-except ImportError:
-    print("ERROR: Jetson.GPIO not found")
-    sys.exit(1)
-
-PINS = {"LIGHT": 15, "PUMP": 11}
-
+# Set your mode (BOARD is usually easiest for Jetson Nano)
 GPIO.setmode(GPIO.BOARD)
-GPIO.setwarnings(True)
 
-for pin in PINS.values():
-    GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
-    GPIO.output(pin, GPIO.LOW, initial=GPIO.HIGH)
-
-print("Starting relay test. Watch for relay LED / listen for clicks.\n")
-
-for name, pin in PINS.items():
-    print(f"=== {name} (BOARD pin {pin}) ===")
-
-    print(f"  LOW  for 3s  (active-LOW relay should click ON now)")
-    GPIO.output(pin, GPIO.LOW)
-    time.sleep(3)
-    GPIO.output(pin, GPIO.LOW)
-
-    print(f"  HIGH for 3s  (active-HIGH relay should click ON now)")
-    GPIO.output(pin, GPIO.HIGH)
-    time.sleep(3)
-    GPIO.output(pin, GPIO.HIGH)
-
-    print(f"  back to LOW\n")
-    GPIO.output(pin, GPIO.LOW)
-    time.sleep(1)
-
-GPIO.cleanup()
-print("Done. Tell me: did the relay click on LOW or HIGH?")
+# 1. Set pin 11 to HIGH (3.3V) immediately on setup
+GPIO.setup(15, GPIO.OUT, initial=GPIO.HIGH)
+time.sleep(5)
+# 2. Set pin 12 to LOW (0V) immediately on setup
+GPIO.setup(15, GPIO.OUT, initial=GPIO.LOW)
