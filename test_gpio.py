@@ -16,7 +16,7 @@ except ImportError:
     print("ERROR: Jetson.GPIO not found")
     sys.exit(1)
 
-PINS = {"LIGHT": 7, "PUMP": 11}
+PINS = {"LIGHT": 15, "PUMP": 11}
 
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
