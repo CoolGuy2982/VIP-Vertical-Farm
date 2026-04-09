@@ -11,7 +11,7 @@ import time
 import sys
 
 try:
-    import Jetson.GPIO as GPIO
+    import RPi.GPIO as GPIO
 except ImportError:
     print("ERROR: Jetson.GPIO not found")
     sys.exit(1)
