@@ -21,8 +21,8 @@ PINS = {"LIGHT": 15, "PUMP": 11}
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
 for pin in PINS.values():
-    GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, GPIO.LOW)
+    GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
+    GPIO.output(pin, GPIO.LOW, initial=GPIO.HIGH)
 
 print("Starting relay test. Watch for relay LED / listen for clicks.\n")
 
