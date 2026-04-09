@@ -1,9 +1,10 @@
 """
-Direct GPIO relay test — run this ON the Jetson Nano.
+Run this directly on the Jetson to diagnose relay wiring.
 
-    python3 test_gpio.py
+    sudo python3 test_gpio.py
 
-Tests each relay in sequence (BOARD pin numbering, active-low logic).
+Works through each relay pin and tries both LOW and HIGH signals
+so you can figure out whether your relay module is active-LOW or active-HIGH.
 """
 
 import time
@@ -12,35 +13,60 @@ import sys
 try:
     import Jetson.GPIO as GPIO
 except ImportError:
-    print("ERROR: Jetson.GPIO not found. Try: sudo apt install python3-jetson-gpio")
+    print("ERROR: Jetson.GPIO not found.")
     sys.exit(1)
 
 PINS = {
-    "LIGHT":     7,
-    "PUMP":     11,
+    "LIGHT":      7,
+    "PUMP":      11,
     "DASHBOARD": 22,
 }
 
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
 
-for name, pin in PINS.items():
+for pin in PINS.values():
     GPIO.setup(pin, GPIO.OUT)
-    GPIO.output(pin, GPIO.HIGH)   # start OFF (active-low)
+    GPIO.output(pin, GPIO.LOW)
 
-print("GPIO ready. Pins initialised HIGH (all relays OFF).\n")
+print("=" * 50)
+print("GPIO RELAY DIAGNOSTIC")
+print("=" * 50)
+print("Watch/listen for relay clicks.\n")
 
 for name, pin in PINS.items():
-    input(f"Press Enter to test {name} relay (BOARD pin {pin})...")
-    print(f"  Setting pin {pin} LOW  → {name} relay should click ON")
+    print(f"--- {name} (BOARD pin {pin}) ---")
+    input("  Press Enter to start...")
+
+    print(f"  LOW  signal on pin {pin} (3 seconds)")
     GPIO.output(pin, GPIO.LOW)
     time.sleep(3)
-    print(f"  Setting pin {pin} HIGH → {name} relay should click OFF")
+    GPIO.output(pin, GPIO.LOW)  # keep low
+
+    heard = input("  Did relay click when LOW? (y/n): ").strip().lower()
+    low_works = heard == "y"
+
+    print(f"  HIGH signal on pin {pin} (3 seconds)")
     GPIO.output(pin, GPIO.HIGH)
-    result = input(f"  Did you hear a click? (y/n): ").strip().lower()
-    if result != "y":
-        print(f"  *** {name} relay did NOT click — check wiring on pin {pin} ***")
+    time.sleep(3)
+    GPIO.output(pin, GPIO.HIGH)  # keep high
+
+    heard = input("  Did relay click when HIGH? (y/n): ").strip().lower()
+    high_works = heard == "y"
+
+    GPIO.output(pin, GPIO.LOW)  # return to low
+
+    if low_works and not high_works:
+        print(f"  RESULT: {name} is ACTIVE-LOW (correct, matches actuators.py)")
+    elif high_works and not low_works:
+        print(f"  RESULT: {name} is ACTIVE-HIGH — actuators.py needs to be flipped!")
+    elif not low_works and not high_works:
+        print(f"  RESULT: {name} did NOT click on either signal.")
+        print(f"          Check: VCC wire should be on Jetson pin 2 (5V), not pin 1 (3.3V)")
+        print(f"          Check: signal wire is actually on physical pin {pin}")
+    else:
+        print(f"  RESULT: clicked on both? Check wiring.")
     print()
 
 GPIO.cleanup()
-print("Done. GPIO cleaned up.")
+print("Done.")
