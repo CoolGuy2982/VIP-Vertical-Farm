@@ -11,7 +11,7 @@ import time
 import sys
 
 try:
-    import RPi.GPIO as GPIO
+    import Jetson.GPIO as GPIO
 except ImportError:
     print("ERROR: Jetson.GPIO not found")
     sys.exit(1)
@@ -19,7 +19,8 @@ except ImportError:
 PINS = {"LIGHT": 15, "PUMP": 11}
 
 GPIO.setmode(GPIO.BOARD)
-GPIO.setwarnings(False)
+GPIO.setwarnings(True)
+
 for pin in PINS.values():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
     GPIO.output(pin, GPIO.LOW, initial=GPIO.HIGH)
