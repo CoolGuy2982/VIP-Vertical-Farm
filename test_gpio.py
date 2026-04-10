@@ -4,6 +4,7 @@ Run on the Jetson to test relay wiring.
     python3 test_gpio.py
 """
 
+import subprocess
 import time
 import sys
 
@@ -15,10 +16,27 @@ except ImportError:
 
 PINS = {"LIGHT": 13, "PUMP": 11}
 
+# Configure pinmux so pins are GPIO outputs (not inputs)
+# These addresses come from the Jetson.GPIO warning messages
+PINMUX = {
+    "LIGHT pin 13": ("0x243D030", "0x1005"),
+    "PUMP  pin 11": ("0x2430098", "0x5"),
+}
+
+print("Configuring pinmux...")
+for name, (addr, val) in PINMUX.items():
+    result = subprocess.run(["busybox", "devmem", addr, "w", val], capture_output=True, text=True)
+    if result.returncode == 0:
+        print(f"  {name} pinmux OK")
+    else:
+        print(f"  {name} pinmux FAILED: {result.stderr.strip()}")
+        print("  Make sure you are running: sudo venv/bin/python3 test_gpio.py")
+        sys.exit(1)
+
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(True)
 
-print("Setting up pins...")
+print("\nSetting up pins...")
 for name, pin in PINS.items():
     GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
     state = GPIO.input(pin)
