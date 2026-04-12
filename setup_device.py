@@ -33,6 +33,8 @@ PUSH_ITEMS = [
     ".env",
     "firebase-credentials.json",
     ".env.example",
+    "apply_pinmux_fix.sh",
+    "all_gpio_pins_v2.dts",
 ]
 
 # skip these when uploading
@@ -167,6 +169,16 @@ def setup_gpio_permissions(ssh, user):
     print(f"  Added {user} to gpio group (takes effect on next login)")
 
 
+def apply_pinmux_fix(ssh, project_dir):
+    print("\n--- Applying Pinmux Fix (All GPIO pins v2) ---")
+    run_cmd(ssh, f"chmod +x {project_dir}/apply_pinmux_fix.sh")
+    run_cmd(ssh, f"sudo bash {project_dir}/apply_pinmux_fix.sh", check=False)
+    print("  Pinmux DTBO compiled and installed to /boot.")
+    print("  ACTION REQUIRED: SSH into the Jetson and run:")
+    print("    sudo /opt/nvidia/jetson-io/jetson-io.py")
+    print("  Select 'All GPIO pins bidirectional v2', save, and reboot.")
+
+
 def create_data_dirs(ssh, project_dir):
     print("\n--- Creating data directories ---")
     run_cmd(ssh, f"mkdir -p {project_dir}/data/images {project_dir}/data/logs")
@@ -224,6 +236,7 @@ def main():
             setup_python_env(ssh, project_dir)
             setup_gpio_permissions(ssh, args.user)
 
+        apply_pinmux_fix(ssh, project_dir)
         setup_systemd_service(ssh, project_dir, args.user)
         restart_service(ssh)
 

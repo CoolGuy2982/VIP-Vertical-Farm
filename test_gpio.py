@@ -1,64 +1,76 @@
 """
-Run on the Jetson to test relay wiring.
+GPIO relay test for Jetson Orin Nano.
 
-    python3 test_gpio.py
+Uses Active-Low logic: pulling a pin LOW turns the relay ON.
+The pinmux must be unlocked first via the DTS overlay — see apply_pinmux_fix.sh.
+
+Usage:
+    sudo venv/bin/python3 test_gpio.py
 """
 
-import subprocess
-import time
 import sys
+import time
 
 try:
     import Jetson.GPIO as GPIO
 except ImportError:
-    print("ERROR: Jetson.GPIO not found")
+    print("ERROR: Jetson.GPIO not found. Install with: pip install Jetson.GPIO")
     sys.exit(1)
 
-PINS = {"LIGHT": 13, "PUMP": 11}
+# BOARD pin numbers matching config.yaml
+PUMP_PIN  = 11   # Relay 1 — water pump   (UART1_RTS_PR4, line 112)
+LIGHT_PIN = 13   # Relay 2 — grow light   (SPI3_SCK_PY0,  line 122)
 
-# Configure pinmux so pins are GPIO outputs (not inputs)
-# These addresses come from the Jetson.GPIO warning messages
-PINMUX = {
-    "LIGHT pin 13": ("0x243D030", "0x1005"),
-    "PUMP  pin 11": ("0x2430098", "0x5"),
-}
+# Active-Low logic: LOW  = relay coil energised (ON)
+#                   HIGH = relay coil released  (OFF)
+RELAY_ON  = GPIO.LOW
+RELAY_OFF = GPIO.HIGH
 
-print("Configuring pinmux...")
-for name, (addr, val) in PINMUX.items():
-    result = subprocess.run(["busybox", "devmem", addr, "w", val], capture_output=True, text=True)
-    if result.returncode == 0:
-        print(f"  {name} pinmux OK")
-    else:
-        print(f"  {name} pinmux FAILED: {result.stderr.strip()}")
-        print("  Make sure you are running: sudo venv/bin/python3 test_gpio.py")
-        sys.exit(1)
+PULSE_SECONDS = 3   # how long each relay stays ON during the test
 
-GPIO.setmode(GPIO.BOARD)
-GPIO.setwarnings(True)
 
-print("\nSetting up pins...")
-for name, pin in PINS.items():
-    GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
+def pulse(pin: int, label: str):
+    print(f"\n--- {label} (BOARD pin {pin}) ---")
+    print("  NOTE: LOW = relay coil ON (click should be heard)")
+
+    GPIO.output(pin, RELAY_ON)
     state = GPIO.input(pin)
-    print(f"  {name} pin {pin} — set HIGH, reads back: {state} (expect 1)")
+    print(f"  -> Set LOW  (RELAY ON)  — readback: {state}  [expect 0]  ← listen for click")
+    time.sleep(PULSE_SECONDS)
 
-print("\nAll pins HIGH. Starting test in 2 seconds...\n")
-time.sleep(2)
-
-for name, pin in PINS.items():
-    print(f"=== {name} (BOARD pin {pin}) ===")
-
-    GPIO.output(pin, GPIO.LOW)
+    GPIO.output(pin, RELAY_OFF)
     state = GPIO.input(pin)
-    print(f"  Set LOW  — reads back: {state} (expect 0) — listen for click...")
-    time.sleep(3)
+    print(f"  -> Set HIGH (RELAY OFF) — readback: {state}  [expect 1]  ← listen for click")
+    time.sleep(1)
 
-    GPIO.output(pin, GPIO.HIGH)
-    state = GPIO.input(pin)
-    print(f"  Set HIGH — reads back: {state} (expect 1) — listen for click...")
-    time.sleep(3)
 
+def main():
+    print("=" * 55)
+    print("  Jetson Orin Nano — GPIO Relay Test (Active-Low)")
+    print("=" * 55)
+    print(f"  Pump  → BOARD pin {PUMP_PIN}")
+    print(f"  Light → BOARD pin {LIGHT_PIN}")
+    print()
+    print("  IMPORTANT: LOW drives the relay coil ON.")
+    print("  You should hear TWO clicks per pin: ON then OFF.")
     print()
 
-GPIO.cleanup()
-print("Done. Share the readback values above.")
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setwarnings(False)
+
+    GPIO.setup(PUMP_PIN,  GPIO.OUT, initial=RELAY_OFF)
+    GPIO.setup(LIGHT_PIN, GPIO.OUT, initial=RELAY_OFF)
+    print("Pins initialised HIGH (relays OFF). Starting in 2 s...")
+    time.sleep(2)
+
+    pulse(PUMP_PIN,  "PUMP")
+    pulse(LIGHT_PIN, "LIGHT")
+
+    GPIO.cleanup()
+    print("\nDone. Both relays returned to OFF state.")
+    print("If no clicks were heard, verify the DTS overlay is applied")
+    print("(run apply_pinmux_fix.sh and reboot).")
+
+
+if __name__ == "__main__":
+    main()

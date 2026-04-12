@@ -148,6 +148,16 @@ def setup_gpio_permissions(ssh, user):
     print(f"  Added {user} to gpio group")
 
 
+def apply_pinmux_fix(ssh, project_dir):
+    print("\n--- Applying Pinmux Fix (All GPIO pins v2) ---")
+    run_cmd(ssh, f"chmod +x {project_dir}/apply_pinmux_fix.sh")
+    run_cmd(ssh, f"sudo bash {project_dir}/apply_pinmux_fix.sh", check=False)
+    print("  Pinmux DTBO compiled and installed to /boot.")
+    print("  ACTION REQUIRED: after setup completes, SSH into the Jetson and run:")
+    print("    sudo /opt/nvidia/jetson-io/jetson-io.py")
+    print("  Select 'All GPIO pins bidirectional v2', save, and reboot.")
+
+
 def create_data_dirs(ssh, project_dir):
     print("\n--- Creating data directories ---")
     run_cmd(ssh, f"mkdir -p {project_dir}/data/images {project_dir}/data/logs")
@@ -266,6 +276,9 @@ def main():
 
     # GPIO permissions
     setup_gpio_permissions(ssh, args.user)
+
+    # Apply pinmux fix so hardware GPIOs are unlocked across reboots
+    apply_pinmux_fix(ssh, project_dir)
 
     # Embed credentials if requested
     if args.embed_env:

@@ -1,0 +1,226 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Jetson Orin Nano - All 40-pin header GPIO pins as bidirectional
+ * Pin names verified against: /sys/kernel/debug/pinctrl/2430000.pinmux/pins
+ * Cross-referenced via line_offset from Jetson.GPIO gpio_pin_data.py
+ *
+ * Board Pin -> line_offset -> kernel pin name (verified)
+ *   Pin  7  -> 144 -> SOC_GPIO59_PAC6   -> soc_gpio59_pac6
+ *   Pin 11  -> 112 -> UART1_RTS_PR4     -> uart1_rts_pr4
+ *   Pin 12  ->  50 -> SOC_GPIO41_PH7    -> soc_gpio41_ph7
+ *   Pin 13  -> 122 -> SPI3_SCK_PY0      -> spi3_sck_py0
+ *   Pin 15  ->  85 -> SOC_GPIO39_PN1    -> soc_gpio39_pn1
+ *   Pin 16  -> 126 -> SPI3_CS1_PY4      -> spi3_cs1_py4
+ *   Pin 18  -> 125 -> SPI3_CS0_PY3      -> spi3_cs0_py3
+ *   Pin 19  -> 135 -> SPI1_MOSI_PZ5     -> spi1_mosi_pz5
+ *   Pin 21  -> 134 -> SPI1_MISO_PZ4     -> spi1_miso_pz4
+ *   Pin 22  -> 123 -> SPI3_MISO_PY1     -> spi3_miso_py1
+ *   Pin 23  -> 133 -> SPI1_SCK_PZ3      -> spi1_sck_pz3
+ *   Pin 24  -> 136 -> SPI1_CS0_PZ6      -> spi1_cs0_pz6
+ *   Pin 26  -> 137 -> SPI1_CS1_PZ7      -> spi1_cs1_pz7
+ *   Pin 29  -> 105 -> SOC_GPIO32_PQ5    -> soc_gpio32_pq5
+ *   Pin 31  -> 106 -> SOC_GPIO33_PQ6    -> soc_gpio33_pq6
+ *   Pin 32  ->  41 -> SOC_GPIO19_PG6    -> soc_gpio19_pg6
+ *   Pin 33  ->  43 -> SOC_GPIO21_PH0    -> soc_gpio21_ph0
+ *   Pin 35  ->  53 -> SOC_GPIO44_PI2    -> soc_gpio44_pi2
+ *   Pin 36  -> 113 -> UART1_CTS_PR5     -> uart1_cts_pr5
+ *   Pin 37  -> 124 -> SPI3_MOSI_PY2     -> spi3_mosi_py2
+ *   Pin 38  ->  52 -> SOC_GPIO43_PI1    -> soc_gpio43_pi1
+ *   Pin 40  ->  51 -> SOC_GPIO42_PI0    -> soc_gpio42_pi0
+ */
+
+/ {
+    jetson-header-name = "Jetson 40pin Header";
+    overlay-name = "All GPIO pins bidirectional v2";
+    compatible = "nvidia,p3768-0000+p3767-0000\0nvidia,p3768-0000+p3767-0001\0nvidia,p3768-0000+p3767-0003\0nvidia,p3768-0000+p3767-0004\0nvidia,p3768-0000+p3767-0005\0nvidia,p3768-0000+p3767-0000-super\0nvidia,p3768-0000+p3767-0001-super\0nvidia,p3768-0000+p3767-0003-super\0nvidia,p3768-0000+p3767-0004-super\0nvidia,p3768-0000+p3767-0005-super\0nvidia,p3509-0000+p3767-0000\0nvidia,p3509-0000+p3767-0001\0nvidia,p3509-0000+p3767-0003\0nvidia,p3509-0000+p3767-0004\0nvidia,p3509-0000+p3767-0005";
+
+    fragment@0 {
+        target = <&pinmux>;
+        __overlay__ {
+            pinctrl-names = "default";
+            pinctrl-0 = <&jetson_io_pinmux>;
+
+            jetson_io_pinmux: exp-header-pinmux {
+
+                /* Board Pin 7 - line 144 - SOC_GPIO59_PAC6 */
+                hdr40-pin7 {
+                    nvidia,pins = "soc_gpio59_pac6";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 11 - line 112 - UART1_RTS_PR4 */
+                hdr40-pin11 {
+                    nvidia,pins = "uart1_rts_pr4";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 12 - line 50 - SOC_GPIO41_PH7 */
+                hdr40-pin12 {
+                    nvidia,pins = "soc_gpio41_ph7";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 13 - line 122 - SPI3_SCK_PY0 */
+                hdr40-pin13 {
+                    nvidia,pins = "spi3_sck_py0";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 15 - line 85 - SOC_GPIO39_PN1 */
+                hdr40-pin15 {
+                    nvidia,pins = "soc_gpio39_pn1";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 16 - line 126 - SPI3_CS1_PY4 */
+                hdr40-pin16 {
+                    nvidia,pins = "spi3_cs1_py4";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 18 - line 125 - SPI3_CS0_PY3 */
+                hdr40-pin18 {
+                    nvidia,pins = "spi3_cs0_py3";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 19 - line 135 - SPI1_MOSI_PZ5 */
+                hdr40-pin19 {
+                    nvidia,pins = "spi1_mosi_pz5";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 21 - line 134 - SPI1_MISO_PZ4 */
+                hdr40-pin21 {
+                    nvidia,pins = "spi1_miso_pz4";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 22 - line 123 - SPI3_MISO_PY1 */
+                hdr40-pin22 {
+                    nvidia,pins = "spi3_miso_py1";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 23 - line 133 - SPI1_SCK_PZ3 */
+                hdr40-pin23 {
+                    nvidia,pins = "spi1_sck_pz3";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 24 - line 136 - SPI1_CS0_PZ6 */
+                hdr40-pin24 {
+                    nvidia,pins = "spi1_cs0_pz6";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 26 - line 137 - SPI1_CS1_PZ7 */
+                hdr40-pin26 {
+                    nvidia,pins = "spi1_cs1_pz7";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 29 - line 105 - SOC_GPIO32_PQ5 */
+                hdr40-pin29 {
+                    nvidia,pins = "soc_gpio32_pq5";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 31 - line 106 - SOC_GPIO33_PQ6 */
+                hdr40-pin31 {
+                    nvidia,pins = "soc_gpio33_pq6";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 32 - line 41 - SOC_GPIO19_PG6 */
+                hdr40-pin32 {
+                    nvidia,pins = "soc_gpio19_pg6";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 33 - line 43 - SOC_GPIO21_PH0 */
+                hdr40-pin33 {
+                    nvidia,pins = "soc_gpio21_ph0";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 35 - line 53 - SOC_GPIO44_PI2 */
+                hdr40-pin35 {
+                    nvidia,pins = "soc_gpio44_pi2";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 36 - line 113 - UART1_CTS_PR5 */
+                hdr40-pin36 {
+                    nvidia,pins = "uart1_cts_pr5";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 37 - line 124 - SPI3_MOSI_PY2 */
+                hdr40-pin37 {
+                    nvidia,pins = "spi3_mosi_py2";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 38 - line 52 - SOC_GPIO43_PI1 */
+                hdr40-pin38 {
+                    nvidia,pins = "soc_gpio43_pi1";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+                /* Board Pin 40 - line 51 - SOC_GPIO42_PI0 */
+                hdr40-pin40 {
+                    nvidia,pins = "soc_gpio42_pi0";
+                    nvidia,tristate = <0x0>;
+                    nvidia,enable-input = <0x1>;
+                    nvidia,pull = <0x0>;
+                };
+
+            };
+        };
+    };
+};

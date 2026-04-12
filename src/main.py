@@ -49,13 +49,17 @@ def main():
     grower = AIGrower(config, base_dir)
     set_grower(grower)
 
-    # Hardware test: Toggle pins 7 and 11 for 10 seconds each
-    logger.info("Starting hardware test: Light (Pin 7) for 10s...")
-    grower.actuators.turn_on_lights(10/60) # 10 seconds in minutes
+    # Hardware test — uses config pin numbers, not hardcoded values
+    gpio_cfg = config.get("gpio", {})
+    light_pin = gpio_cfg.get("grow_light_pin", "?")
+    pump_pin  = gpio_cfg.get("water_pump_pin", "?")
+
+    logger.info("Hardware test: Light relay (BOARD pin %s) ON for 10 s...", light_pin)
+    grower.actuators.turn_on_lights(10 / 60)  # 10 seconds expressed as minutes
     time.sleep(10)
     grower.actuators.turn_off_lights()
-    
-    logger.info("Starting hardware test: Pump (Pin 11) for 10s...")
+
+    logger.info("Hardware test: Pump relay (BOARD pin %s) ON for 10 s...", pump_pin)
     grower.actuators.run_pump(10)
     logger.info("Hardware test complete.")
 
