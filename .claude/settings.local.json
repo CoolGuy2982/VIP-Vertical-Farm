@@ -5,7 +5,8 @@
       "Bash(ls c:/Users/omkar/OneDrive/Documents/GitHub/VIP-Vertical-Farm/*.py)",
       "WebFetch(domain:github.com)",
       "WebSearch",
-      "WebFetch(domain:developer.ridgerun.com)"
+      "WebFetch(domain:developer.ridgerun.com)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

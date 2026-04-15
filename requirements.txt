@@ -23,5 +23,6 @@ firebase-admin>=6.0
 # Jetson Nano only (installed by setup script on the device)
 Jetson.GPIO>=2.0.0
 
-# Wi-Fi smart plug control (water pump)
-python-kasa>=0.7.0
+# Kasa cloud control (water pump smart plug)
+# Note: package is 'tplink-cloud-api' but imports as 'tplinkcloud'
+tplink-cloud-api

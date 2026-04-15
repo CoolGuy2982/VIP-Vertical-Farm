@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import signal
 import sys
 import threading
@@ -8,6 +9,7 @@ from pathlib import Path
 import time
 import uvicorn
 import yaml
+from dotenv import load_dotenv
 
 from .ai_grower import AIGrower
 from .api_server import app, set_grower
@@ -36,6 +38,9 @@ def main():
     setup_logging(base_dir)
     logger = logging.getLogger(__name__)
 
+    # Load .env so KASA_USERNAME / KASA_PASSWORD are available to actuators
+    load_dotenv(Path(base_dir) / ".env")
+
     config_path = Path(base_dir) / "config.yaml"
     if not config_path.exists():
         logger.error("config.yaml not found at %s", config_path)
@@ -50,21 +55,40 @@ def main():
     grower = AIGrower(config, base_dir)
     set_grower(grower)
 
-    # ── Kasa plug reachability check ─────────────────────────────────────────
-    kasa_ip = config.get("kasa", {}).get("plug_ip", "")
-    if not kasa_ip or kasa_ip == "ENTER_PLUG_IP_HERE":
-        logger.warning("Kasa plug IP not configured — set kasa.plug_ip in config.yaml")
+    # ── Kasa cloud connectivity check ────────────────────────────────────────
+    kasa_user   = os.environ.get("KASA_USERNAME", "")
+    kasa_pass   = os.environ.get("KASA_PASSWORD", "")
+    device_alias = config.get("kasa_cloud", {}).get("device_alias", "Water Pump")
+
+    if not kasa_user or not kasa_pass:
+        logger.warning(
+            "Kasa credentials not set — add KASA_USERNAME and KASA_PASSWORD to .env"
+        )
     else:
         try:
-            from kasa import SmartPlug
-            plug = SmartPlug(kasa_ip)
-            asyncio.run(plug.update())
-            logger.info("Kasa plug reachable at %s (alias: %s, is_on: %s)",
-                        kasa_ip, plug.alias, plug.is_on)
-        except Exception as e:
-            logger.warning("Kasa plug at %s is NOT reachable: %s", kasa_ip, e)
+            from tplinkcloud import TPLinkDeviceManager
 
-    # ── Hardware test — reads pin/IP from config, uses actuator methods ───────
+            async def _check_kasa():
+                manager = TPLinkDeviceManager(kasa_user, kasa_pass)
+                device  = await manager.find_device(device_alias)
+                return device
+
+            device = asyncio.run(_check_kasa())
+            if device is not None:
+                logger.info(
+                    "Kasa cloud OK — found pump device '%s' (alias: %s)",
+                    device_alias, device.get_alias(),
+                )
+            else:
+                logger.warning(
+                    "Kasa cloud login OK but device '%s' NOT found — "
+                    "check kasa_cloud.device_alias in config.yaml",
+                    device_alias,
+                )
+        except Exception as e:
+            logger.warning("Kasa cloud check failed: %s", e)
+
+    # ── Hardware test — uses actuator methods, reads all config values ────────
     light_pin = config.get("gpio", {}).get("grow_light_pin", "?")
 
     logger.info("Hardware test: Light relay (BOARD pin %s) ON for 10 s...", light_pin)
@@ -72,7 +96,7 @@ def main():
     time.sleep(10)
     grower.actuators.turn_off_lights()
 
-    logger.info("Hardware test: Pump (Kasa %s) ON for 10 s...", kasa_ip or "UNCONFIGURED")
+    logger.info("Hardware test: Pump ('%s' via Kasa cloud) ON for 10 s...", device_alias)
     grower.actuators.run_pump(10)
     logger.info("Hardware test complete.")
 

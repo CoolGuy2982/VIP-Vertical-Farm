@@ -37,15 +37,16 @@ hardware_specs:
 
 # GPIO pin numbers (BOARD — Jetson Orin Nano 40-pin header)
 # VCC → Pin 2 (5V), GND → Pin 6
-# Signal Pins: Light = 13  (Pump is now Wi-Fi via Kasa — see kasa section below)
+# Signal Pins: Light = 13  (Pump is now Kasa cloud — see kasa_cloud section below)
 gpio:
   grow_light_pin: 13    # Relay → grow light (BOARD Pin 13, Active-Low)
   dashboard_relay_pin: 22 # Not used (dashboard always on)
 
-# TP-Link Kasa HS103 Smart Plug — water pump control over Wi-Fi
-# Find the IP in the Kasa mobile app: Devices → plug → Settings → Device Info
-kasa:
-  plug_ip: "ENTER_PLUG_IP_HERE"
+# TP-Link Kasa cloud control — water pump smart plug
+# Credentials are in .env (KASA_USERNAME / KASA_PASSWORD)
+# device_alias must exactly match the name shown in the Kasa mobile app
+kasa_cloud:
+  device_alias: "Water Pump"
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
 

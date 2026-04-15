@@ -1,11 +1,12 @@
 import asyncio
 import logging
+import os
 import threading
 import time
 from datetime import datetime
 
 import Jetson.GPIO as GPIO
-from kasa import SmartPlug
+from tplinkcloud import TPLinkDeviceManager
 
 logger = logging.getLogger(__name__)
 
@@ -17,15 +18,17 @@ OFF_STATE = GPIO.HIGH
 class Actuators:
     def __init__(self, config: dict):
         self.config = config
-        gpio_cfg = config.get("gpio", {})
-        kasa_cfg = config.get("kasa", {})
+        gpio_cfg      = config.get("gpio", {})
+        kasa_cloud_cfg = config.get("kasa_cloud", {})
 
         # Physical relay pins (grow light + dashboard)
         self.light_pin = gpio_cfg.get("grow_light_pin", 13)
         self.dash_pin  = gpio_cfg.get("dashboard_relay_pin", 22)
 
-        # Kasa Wi-Fi plug for the water pump
-        self._kasa_ip = kasa_cfg.get("plug_ip", "")
+        # Kasa cloud credentials — always from environment, never config
+        self._kasa_user  = os.environ.get("KASA_USERNAME", "")
+        self._kasa_pass  = os.environ.get("KASA_PASSWORD", "")
+        self._device_alias = kasa_cloud_cfg.get("device_alias", "Water Pump")
 
         self._light_on     = False
         self._dash_on      = False
@@ -49,27 +52,51 @@ class Actuators:
         GPIO.output(self.light_pin, OFF_STATE)
         GPIO.output(self.dash_pin,  OFF_STATE)
 
+        creds_ok = bool(self._kasa_user and self._kasa_pass)
         logger.info(
-            "GPIO initialized (Active-Low, BOARD) | light=pin%d | Kasa pump=%s",
+            "GPIO initialized (Active-Low, BOARD) | light=pin%d "
+            "| Kasa cloud pump='%s' credentials=%s",
             self.light_pin,
-            self._kasa_ip if self._kasa_ip else "NOT CONFIGURED",
+            self._device_alias,
+            "OK" if creds_ok else "MISSING — set KASA_USERNAME/KASA_PASSWORD in .env",
         )
 
-    # ── Kasa helper ──────────────────────────────────────────────────────────
+    # ── Kasa cloud helpers ────────────────────────────────────────────────────
 
     def _run_async(self, coro):
-        """Execute an async coroutine from synchronous code.
+        """Run an async coroutine from synchronous code.
 
-        Safe because every caller runs in a context with no active event loop:
-        - The grower scheduler fires handlers in a plain threading.Thread.
-        - FastAPI routes that are sync `def` are dispatched by anyio into a
-          threadpool worker thread — also no event loop present.
-        Neither path is on uvicorn's main-thread event loop, so asyncio.run()
-        always creates a fresh loop without conflicting with anything.
+        Safe in all calling contexts:
+        - The grower scheduler fires handlers in a plain threading.Thread
+          (no event loop present).
+        - FastAPI sync `def` routes are dispatched by anyio into a threadpool
+          worker thread (also no event loop present).
+        Neither path lives on uvicorn's main-thread event loop, so
+        asyncio.run() always creates a fresh loop without conflict.
         """
         return asyncio.run(coro)
 
-    # ── Water pump (Kasa Wi-Fi) ───────────────────────────────────────────────
+    async def _get_pump_device(self):
+        """Authenticate against Kasa cloud and return the pump device.
+
+        Raises RuntimeError if credentials are missing or device not found.
+        """
+        if not self._kasa_user or not self._kasa_pass:
+            raise RuntimeError(
+                "KASA_USERNAME or KASA_PASSWORD not set in environment"
+            )
+
+        manager = TPLinkDeviceManager(self._kasa_user, self._kasa_pass)
+        device  = await manager.find_device(self._device_alias)
+
+        if device is None:
+            raise RuntimeError(
+                f"Device '{self._device_alias}' not found in Kasa cloud account. "
+                "Check kasa_cloud.device_alias in config.yaml matches the Kasa app name exactly."
+            )
+        return device
+
+    # ── Water pump (Kasa cloud) ───────────────────────────────────────────────
 
     def run_pump(self, seconds: float) -> dict:
         pump_cfg = self.config.get("water_pump", {})
@@ -79,28 +106,26 @@ class Actuators:
         )
 
         result = {
-            "action":    "run_pump",
-            "seconds":   round(seconds, 1),
-            "timestamp": datetime.now().isoformat(),
-            "method":    "kasa_wifi",
-            "plug_ip":   self._kasa_ip,
+            "action":       "run_pump",
+            "seconds":      round(seconds, 1),
+            "timestamp":    datetime.now().isoformat(),
+            "method":       "kasa_cloud",
+            "device_alias": self._device_alias,
         }
 
-        if not self._kasa_ip:
-            msg = "kasa.plug_ip is not set in config.yaml"
-            logger.error("run_pump: %s", msg)
-            result["error"] = msg
-            return result
-
-        logger.info("pump (Kasa %s) ON for %.1f s", self._kasa_ip, seconds)
+        logger.info("pump ('%s' via Kasa cloud) ON for %.1f s",
+                    self._device_alias, seconds)
         self._pump_running = True
         try:
-            plug = SmartPlug(self._kasa_ip)
-            self._run_async(plug.turn_on())
-            time.sleep(seconds)
-            self._run_async(plug.turn_off())
+            async def _do_pump():
+                device = await self._get_pump_device()
+                await device.power_on()
+                await asyncio.sleep(seconds)   # non-blocking inside the event loop
+                await device.power_off()
+
+            self._run_async(_do_pump())
         except Exception as e:
-            logger.error("Kasa pump error: %s", e)
+            logger.error("Kasa cloud pump error: %s", e)
             result["error"] = str(e)
         finally:
             self._pump_running = False
@@ -173,7 +198,8 @@ class Actuators:
             "dashboard_on":       self._dash_on,
             "pump_running":       self._pump_running,
             "total_pump_seconds": round(self._total_pump_seconds, 1),
-            "kasa_plug_ip":       self._kasa_ip,
+            "pump_device":        self._device_alias,
+            "pump_method":        "kasa_cloud",
         }
 
     def _log_action(self, action: dict):
@@ -194,11 +220,15 @@ class Actuators:
         GPIO.output(self.dash_pin,  OFF_STATE)
         GPIO.cleanup()
 
-        # Safety: ensure the Kasa plug is off on graceful shutdown
-        if self._kasa_ip:
+        # Safety: best-effort pump-off on graceful shutdown
+        if self._kasa_user and self._kasa_pass:
             try:
-                plug = SmartPlug(self._kasa_ip)
-                self._run_async(plug.turn_off())
-                logger.info("Kasa plug %s turned off on shutdown", self._kasa_ip)
+                async def _safe_off():
+                    device = await self._get_pump_device()
+                    await device.power_off()
+
+                self._run_async(_safe_off())
+                logger.info("Kasa cloud pump '%s' turned off on shutdown",
+                            self._device_alias)
             except Exception as e:
-                logger.warning("Could not turn off Kasa plug on shutdown: %s", e)
+                logger.warning("Could not turn off Kasa pump on shutdown: %s", e)
