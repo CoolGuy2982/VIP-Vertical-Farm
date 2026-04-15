@@ -35,6 +35,7 @@ PUSH_ITEMS = [
     ".env.example",
     "apply_pinmux_fix.sh",
     "all_gpio_pins_v2.dts",
+    "test_hardware.py",
 ]
 
 # skip these when uploading

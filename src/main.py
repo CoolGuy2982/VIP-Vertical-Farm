@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import signal
 import sys
@@ -49,17 +50,29 @@ def main():
     grower = AIGrower(config, base_dir)
     set_grower(grower)
 
-    # Hardware test — uses config pin numbers, not hardcoded values
-    gpio_cfg = config.get("gpio", {})
-    light_pin = gpio_cfg.get("grow_light_pin", "?")
-    pump_pin  = gpio_cfg.get("water_pump_pin", "?")
+    # ── Kasa plug reachability check ─────────────────────────────────────────
+    kasa_ip = config.get("kasa", {}).get("plug_ip", "")
+    if not kasa_ip or kasa_ip == "ENTER_PLUG_IP_HERE":
+        logger.warning("Kasa plug IP not configured — set kasa.plug_ip in config.yaml")
+    else:
+        try:
+            from kasa import SmartPlug
+            plug = SmartPlug(kasa_ip)
+            asyncio.run(plug.update())
+            logger.info("Kasa plug reachable at %s (alias: %s, is_on: %s)",
+                        kasa_ip, plug.alias, plug.is_on)
+        except Exception as e:
+            logger.warning("Kasa plug at %s is NOT reachable: %s", kasa_ip, e)
+
+    # ── Hardware test — reads pin/IP from config, uses actuator methods ───────
+    light_pin = config.get("gpio", {}).get("grow_light_pin", "?")
 
     logger.info("Hardware test: Light relay (BOARD pin %s) ON for 10 s...", light_pin)
     grower.actuators.turn_on_lights(10 / 60)  # 10 seconds expressed as minutes
     time.sleep(10)
     grower.actuators.turn_off_lights()
 
-    logger.info("Hardware test: Pump relay (BOARD pin %s) ON for 10 s...", pump_pin)
+    logger.info("Hardware test: Pump (Kasa %s) ON for 10 s...", kasa_ip or "UNCONFIGURED")
     grower.actuators.run_pump(10)
     logger.info("Hardware test complete.")
 
