@@ -45,8 +45,8 @@ except Exception as e:
 parser = argparse.ArgumentParser(description="VIP Farm hardware test")
 parser.add_argument("--alias", default=DEVICE_ALIAS,
                     help="Kasa device alias to test (overrides config.yaml)")
-parser.add_argument("--pulse", type=float, default=3.0,
-                    help="Seconds to hold each relay/plug ON during the test (default: 3)")
+parser.add_argument("--pulse", type=float, default=15.0,
+                    help="Seconds to hold each relay/plug ON during the test (default: 15)")
 parser.add_argument("--skip-light", action="store_true", help="Skip the light relay test")
 parser.add_argument("--skip-pump",  action="store_true", help="Skip the Kasa pump test")
 args = parser.parse_args()
