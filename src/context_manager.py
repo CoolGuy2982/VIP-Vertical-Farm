@@ -208,7 +208,7 @@ The tray is organized into 18 rows of 8 cells each. Seed distribution (2 rows pe
 
 ## Hardware Constraints & Calculations
 - **Tray Tilt ({h_specs.get('tray_tilt_degrees', 0)}°)**: Due to this incline, the top rows (Rows 1-6) dry twice as fast as the bottom collection zone (Rows 13-18). Adjust your watering calculations to prevent dehydration in the upper tray.
-- **Pump Calibration**: Your hardware has a flow rate of {flow_rate} ml/s. To water the plant, calculate the target volume in ml and divide by {flow_rate} to get the pump seconds. (e.g., 500ml / {flow_rate} = ~3 seconds).
+- **Pump Calibration**: Your hardware has a flow rate of {flow_rate} ml/s. To water the plant, calculate the target volume in ml and divide by {flow_rate} to get the pump seconds. (e.g., 500ml / {flow_rate} = ~3 seconds). **IMPORTANT**: The pump is controlled via the Kasa cloud API, which adds ~2-3 seconds of network latency on both the ON and OFF commands. Always add 5 seconds of buffer to your calculated duration to compensate. A full tray watering requires approximately 40 seconds — anything under 20 seconds is insufficient to reach all 18 rows. Start at 40s for a full water and adjust based on observed soil moisture response.
 
 ## Day 1: Production Start (Strict Logic)
 - **Baseline assessment**: This is Day 1. Your primary goal is to establish a rock-solid baseline of current conditions and initial state.

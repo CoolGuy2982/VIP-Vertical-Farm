@@ -68,11 +68,12 @@ GROWER_TOOLS = [
     {
         "name": "run_pump",
         "description": (
-            "Run the water pump relay for a precise number of seconds. "
-            "The pump delivers water at a fixed rate, you need to calibrate your mental "
-            "model of how much water N seconds produces for this specific setup. "
-            "Start conservative (3-10s) and increase based on observed soil moisture response. "
-            "NEVER run if soil moisture is above 65%. Always log the reason."
+            "Run the water pump for a precise number of seconds via the Kasa cloud. "
+            "IMPORTANT: The cloud API adds ~2-3s of latency on both ON and OFF commands — "
+            "always add 5s of buffer to your target duration. "
+            "A full 18-row tray watering requires ~40 seconds; anything under 20s will not "
+            "reach all rows. Start at 40s for a full water and adjust based on observed "
+            "soil moisture response. NEVER run if soil moisture is above 65%. Always log the reason."
         ),
         "parameters": {
             "type": "object",

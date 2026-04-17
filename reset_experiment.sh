@@ -19,7 +19,26 @@ fi
 echo ""
 echo "Syncing system clock..."
 sudo timedatectl set-ntp true
-echo "  Clock sync OK"
+
+# Try NTP sync via multiple servers
+if sudo ntpdate -u pool.ntp.org 2>/dev/null; then
+    echo "  Clock synced via pool.ntp.org"
+elif sudo ntpdate -u time.google.com 2>/dev/null; then
+    echo "  Clock synced via time.google.com"
+elif sudo ntpdate -u time.cloudflare.com 2>/dev/null; then
+    echo "  Clock synced via time.cloudflare.com"
+else
+    # NTP is likely blocked on this network — set time from the internet via HTTP
+    echo "  NTP blocked, falling back to HTTP time sync..."
+    HTTP_DATE=$(curl -sI --max-time 5 http://google.com | grep -i "^date:" | sed 's/[Dd]ate: //')
+    if [[ -n "$HTTP_DATE" ]]; then
+        sudo timedatectl set-time "$(date -d "$HTTP_DATE" '+%Y-%m-%d %H:%M:%S')" 2>/dev/null \
+            && echo "  Clock set from HTTP headers: $HTTP_DATE" \
+            || echo "  WARNING: Could not set clock from HTTP — set it manually with: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS'"
+    else
+        echo "  WARNING: All clock sync methods failed. Set manually: sudo timedatectl set-time 'YYYY-MM-DD HH:MM:SS'"
+    fi
+fi
 
 echo ""
 echo "Clearing log files..."

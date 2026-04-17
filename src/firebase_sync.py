@@ -106,6 +106,8 @@ class FirebaseSync:
     # background worker
 
     def _upload_worker(self):
+        consecutive_auth_failures = 0
+
         while self._running:
             try:
                 item_type, data = self._upload_queue.get(timeout=2)
@@ -125,11 +127,27 @@ class FirebaseSync:
                     self._do_log_document("alerts", data)
                 elif item_type == "growth_summary":
                     self._do_save_summary(data)
+                consecutive_auth_failures = 0  # reset on success
+
             except Exception as e:
-                logger.error("Firebase upload failed (%s): %s", item_type, e)
-                # put it back for retry after a short delay
-                time.sleep(5)
-                self._upload_queue.put((item_type, data))
+                err_str = str(e)
+                is_auth_error = "invalid_grant" in err_str or "RefreshError" in err_str or "Invalid JWT" in err_str
+
+                if is_auth_error:
+                    consecutive_auth_failures += 1
+                    backoff = min(60 * consecutive_auth_failures, 300)  # max 5 min
+                    logger.error(
+                        "Firebase auth error (attempt %d) — Jetson clock is likely out of sync. "
+                        "Fix: sudo timedatectl set-time \"YYYY-MM-DD HH:MM:SS\". "
+                        "Retrying in %ds. Error: %s",
+                        consecutive_auth_failures, backoff, e,
+                    )
+                    time.sleep(backoff)
+                    self._upload_queue.put((item_type, data))
+                else:
+                    logger.error("Firebase upload failed (%s): %s", item_type, e)
+                    time.sleep(5)
+                    self._upload_queue.put((item_type, data))
 
     def _do_upload_image(self, data: dict):
         local_path = data["local_path"]
