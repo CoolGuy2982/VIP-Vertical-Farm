@@ -57,9 +57,6 @@ class Camera:
                 logger.error("%s cam (index %d) returned no frame", cam_name, device_index)
                 return None
 
-            # Rotation correction for plant camera
-            if cam_name == "plant":
-                frame = cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
 
             cv2.imwrite(str(filepath), frame)
             logger.info("%s photo saved: %s", cam_name, filepath)
