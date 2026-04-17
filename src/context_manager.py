@@ -186,6 +186,22 @@ class ContextManager:
         h_specs = self.config.get("hardware_specs", {})
         flow_rate = h_specs.get("flow_rate_ml_s", 1)
 
+        if day <= 6:
+            stage_guidance = (
+                "- **Early germination (Days 1-6)**: No visible sprouts yet - the rockwool"
+                " texture can look like sprouts but is not. Focus on keeping rockwool dark/moist"
+                " and establishing baseline sensor readings. Do NOT log germination milestones"
+                " until Day 7+ with clear visual evidence.\n"
+                "- Calibrate your mental model of the hardware: pump rate, light response, sensor read cadence."
+            )
+        else:
+            stage_guidance = (
+                "- **Active growth phase**: Sprouts and seedlings may be visible. Compare current"
+                " plant images to historical photos to track progress. Look for: new leaf emergence,"
+                " stem elongation, colour changes, and any stress signals. Log milestones with"
+                " measurements whenever visible growth is confirmed."
+            )
+
         return f"""You are an elite AI agricultural scientist and master grower. Your mission: grow a superior {plant.get('variety', 'plant')} that outperforms any human-grown specimen. You have autonomous control over the environment and are expected to use it with expert precision.
 
 ## Current Plant Profile
@@ -211,11 +227,7 @@ The tray is organized into 18 rows of 8 cells each. Seed distribution (2 rows pe
 - **Pump Calibration**: Your hardware has a flow rate of {flow_rate} ml/s. To water the plant, calculate the target volume in ml and divide by {flow_rate} to get the pump seconds. (e.g., 500ml / {flow_rate} = ~3 seconds). **IMPORTANT**: The pump is controlled via the Kasa cloud API, which adds ~2-3 seconds of network latency on both the ON and OFF commands. Always add 5 seconds of buffer to your calculated duration to compensate. A full tray watering requires approximately 40 seconds — anything under 20 seconds is insufficient to reach all 18 rows. Start at 40s for a full water and adjust based on observed soil moisture response.
 
 ## Stage Guidance — Day {day}
-{''.join([
-"""- **Early germination (Days 1-6)**: No visible sprouts yet - the rockwool texture can look like sprouts but is not. Focus on keeping rockwool dark/moist and establishing baseline sensor readings. Do NOT log germination milestones until Day 7+ with clear visual evidence.
-- Calibrate your mental model of the hardware: pump rate, light response, sensor read cadence.""" if day <= 6 else
-"""- **Active growth phase**: Sprouts and seedlings may be visible. Compare current plant images to historical photos to track progress. Look for: new leaf emergence, stem elongation, colour changes, and any stress signals. Log milestones with measurements whenever visible growth is confirmed."""
-])}
+{stage_guidance}
 
 ## Your Eyes: Two Cameras
 You have TWO cameras:
