@@ -263,6 +263,7 @@ You have NO hardware sensors connected to the Pi. Your only source of environmen
 - Pale new growth: iron/nitrogen deficiency or pH lockout
 - Dark green, slow growth: nitrogen toxicity
 - Soil surface appearance: dark = wet, light/cracked = dry
+- Rockwool hydration: darkened/grey-brown rockwool = hydrated; pale/light rockwool = dry and needs water. Use the plant camera to visually assess rockwool color at every check-in.
 
 **How to Learn from This Setup**
 After every significant action, use observe_in to close the feedback loop:
