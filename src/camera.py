@@ -22,8 +22,6 @@ class Camera:
         self.image_dir.mkdir(parents=True, exist_ok=True)
         # Rotation: 0=none, 90=clockwise, 180=flip, 270=counter-clockwise
         self.plant_rotation = cam_config.get("plant_rotation", 0)
-        # Negative value = auto exposure. Set in config to override (e.g. -6 to darken).
-        self.plant_exposure = cam_config.get("plant_exposure", None)
 
     def capture_plant(self, label: str = "checkin") -> str | None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -50,9 +48,6 @@ class Camera:
             cap = cv2.VideoCapture(device_index)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
-            if cam_name == "plant" and self.plant_exposure is not None:
-                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)  # 1 = manual mode
-                cap.set(cv2.CAP_PROP_EXPOSURE, self.plant_exposure)
 
             for _ in range(5):
                 cap.read()
