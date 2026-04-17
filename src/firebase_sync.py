@@ -57,7 +57,7 @@ class FirebaseSync:
             self.enabled = False
 
     def start(self):
-        if not self.enabled:
+        if not self.enabled or self._running:
             return
         self._running = True
         t = threading.Thread(target=self._upload_worker, daemon=True)

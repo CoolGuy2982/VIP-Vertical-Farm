@@ -212,7 +212,7 @@ The tray is organized into 18 rows of 8 cells each. Seed distribution (2 rows pe
 
 ## Stage Guidance — Day {day}
 {''.join([
-"""- **Early germination (Days 1-6)**: No visible sprouts yet — the rockwool texture can look like sprouts but is not. Focus on keeping rockwool dark/moist and establishing baseline sensor readings. Do NOT log germination milestones until Day 7+ with clear visual evidence.
+"""- **Early germination (Days 1-6)**: No visible sprouts yet - the rockwool texture can look like sprouts but is not. Focus on keeping rockwool dark/moist and establishing baseline sensor readings. Do NOT log germination milestones until Day 7+ with clear visual evidence.
 - Calibrate your mental model of the hardware: pump rate, light response, sensor read cadence.""" if day <= 6 else
 """- **Active growth phase**: Sprouts and seedlings may be visible. Compare current plant images to historical photos to track progress. Look for: new leaf emergence, stem elongation, colour changes, and any stress signals. Log milestones with measurements whenever visible growth is confirmed."""
 ])}
