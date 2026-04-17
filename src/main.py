@@ -104,9 +104,11 @@ def main():
     logger.info("Camera test: turning light on for photos...")
     grower.firebase.start()  # start worker so uploads are processed
     grower.actuators.turn_on_lights(5)  # 5 min ceiling; we'll turn it off right after
-    time.sleep(3)  # let light stabilize before capturing
+    time.sleep(5)  # let light fully stabilize before capturing
+    logger.info("Camera test: light is on, capturing now...")
     images = grower.camera.capture_both("startup_test")
     grower.actuators.turn_off_lights()
+    logger.info("Camera test: light off")
     for cam_name, img_path in images.items():
         if img_path:
             grower.firebase.upload_image(img_path, trigger_type="startup_test_" + cam_name)
