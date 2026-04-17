@@ -99,6 +99,9 @@ class AIGrower:
             logger.info("[%s] Day %d - %s", trigger_type.upper(), day,
                         datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
+            # Collect historical plant photos BEFORE capturing new ones
+            historical_plant = self.camera.get_recent_plant_images(count=4)
+
             images = self.camera.capture_both(trigger_type)
 
             plant_image = images.get("plant")
@@ -126,11 +129,27 @@ class AIGrower:
                 trigger_context=trigger_context,
             )
 
-            image_note = ""
+            # Build ordered image list and labels: historical plant photos → current plant → dashboard
+            all_images: list[str] = []
+            image_labels: list[str] = []
+
+            for i, (path, ts) in enumerate(historical_plant):
+                all_images.append(path)
+                image_labels.append(f"Image {i+1}: historical plant photo from {ts}")
+
+            idx = len(historical_plant) + 1
             if plant_image:
-                image_note += "Image 1 is the PLANT camera. "
+                all_images.append(plant_image)
+                image_labels.append(f"Image {idx}: CURRENT plant photo (just taken now)")
+                idx += 1
             if dashboard_image:
-                image_note += "Image 2 is the DASHBOARD camera showing sensor readings. Read the values and call report_sensors. "
+                all_images.append(dashboard_image)
+                image_labels.append(
+                    f"Image {idx}: CURRENT dashboard camera (just taken now) — "
+                    "read every value shown and call report_sensors"
+                )
+
+            image_note = "\n".join(image_labels)
 
             if trigger_type == "observe":
                 user_message = (
@@ -153,8 +172,7 @@ class AIGrower:
                     f"Schedule your next check-in."
                 )
 
-            check_images = [p for p in [plant_image, dashboard_image] if p]
-            response = self._run_tool_loop(system_prompt, user_message, check_images)
+            response = self._run_tool_loop(system_prompt, user_message, all_images)
 
             elapsed = time.time() - checkin_start
             self._log_decision(

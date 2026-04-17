@@ -88,6 +88,20 @@ class Camera:
         images = sorted(self.image_dir.glob(f"{cam_type}_*.jpg"))
         return str(images[-1]) if images else None
 
+    def get_recent_plant_images(self, count: int = 4) -> list[tuple[str, str]]:
+        """Return (path, human_timestamp) for the last `count` plant photos."""
+        images = sorted(self.image_dir.glob("plant_*.jpg"))
+        result = []
+        for img in images[-count:]:
+            parts = img.stem.split("_")
+            try:
+                ts = datetime.strptime(f"{parts[-2]}_{parts[-1]}", "%Y%m%d_%H%M%S")
+                ts_str = ts.strftime("%Y-%m-%d %H:%M")
+            except (ValueError, IndexError):
+                ts_str = "unknown time"
+            result.append((str(img), ts_str))
+        return result
+
     def cleanup_old_images(self, keep_count: int = 200):
         images = sorted(self.image_dir.glob("*.jpg"))
         if len(images) > keep_count:

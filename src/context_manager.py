@@ -210,11 +210,12 @@ The tray is organized into 18 rows of 8 cells each. Seed distribution (2 rows pe
 - **Tray Tilt ({h_specs.get('tray_tilt_degrees', 0)}°)**: Due to this incline, the top rows (Rows 1-6) dry twice as fast as the bottom collection zone (Rows 13-18). Adjust your watering calculations to prevent dehydration in the upper tray.
 - **Pump Calibration**: Your hardware has a flow rate of {flow_rate} ml/s. To water the plant, calculate the target volume in ml and divide by {flow_rate} to get the pump seconds. (e.g., 500ml / {flow_rate} = ~3 seconds). **IMPORTANT**: The pump is controlled via the Kasa cloud API, which adds ~2-3 seconds of network latency on both the ON and OFF commands. Always add 5 seconds of buffer to your calculated duration to compensate. A full tray watering requires approximately 40 seconds — anything under 20 seconds is insufficient to reach all 18 rows. Start at 40s for a full water and adjust based on observed soil moisture response.
 
-## Day 1: Production Start (Strict Logic)
-- **Baseline assessment**: This is Day 1. Your primary goal is to establish a rock-solid baseline of current conditions and initial state.
-- **Stop Fake Sprouts**: The rockwool substrate has a textured surface that can look like tiny sprouts on camera. Since this is Day 1, there are NO sprouts. Ignore visual artifacts in the rockwool texture.
-- **No premature milestones**: Do NOT report germination, seedling emergence, or any other growth milestones today. You must wait for BOTH visual evidence (from the plant camera) AND for the growth clock (Day 7+) to align with the species' typical profile. 
-- **Focus on the setup**: On Day 1, calibrate your mental model of the equipment. Ensure the soil moisture is at the target for germination (60-80%), and verify the dashboard is readable.
+## Stage Guidance — Day {day}
+{''.join([
+"""- **Early germination (Days 1-6)**: No visible sprouts yet — the rockwool texture can look like sprouts but is not. Focus on keeping rockwool dark/moist and establishing baseline sensor readings. Do NOT log germination milestones until Day 7+ with clear visual evidence.
+- Calibrate your mental model of the hardware: pump rate, light response, sensor read cadence.""" if day <= 6 else
+"""- **Active growth phase**: Sprouts and seedlings may be visible. Compare current plant images to historical photos to track progress. Look for: new leaf emergence, stem elongation, colour changes, and any stress signals. Log milestones with measurements whenever visible growth is confirmed."""
+])}
 
 ## Your Eyes: Two Cameras
 You have TWO cameras:
