@@ -20,6 +20,8 @@ class Camera:
         self.resolution = tuple(cam_config.get("resolution", [1280, 720]))
         self.image_dir = Path(cam_config.get("image_dir", "data/images"))
         self.image_dir.mkdir(parents=True, exist_ok=True)
+        # Rotation: 0=none, 90=clockwise, 180=flip, 270=counter-clockwise
+        self.plant_rotation = cam_config.get("plant_rotation", 0)
         # Negative value = auto exposure. Set in config to override (e.g. -6 to darken).
         self.plant_exposure = cam_config.get("plant_exposure", None)
 
@@ -62,9 +64,14 @@ class Camera:
                 logger.error("%s cam (index %d) returned no frame", cam_name, device_index)
                 return None
 
-            # Rotation correction for plant camera (mount orientation)
-            if cam_name == "plant":
-                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+            if cam_name == "plant" and self.plant_rotation != 0:
+                _rot_map = {
+                    90:  cv2.ROTATE_90_CLOCKWISE,
+                    180: cv2.ROTATE_180,
+                    270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+                }
+                if self.plant_rotation in _rot_map:
+                    frame = cv2.rotate(frame, _rot_map[self.plant_rotation])
 
 
             cv2.imwrite(str(filepath), frame)

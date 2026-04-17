@@ -65,7 +65,8 @@ camera:
   dashboard_cam_index: 2    # USB webcam pointed at the tent dashboard
   resolution: [1280, 720]
   image_dir: "data/images"
-  # plant_exposure: -6   # uncomment + lower value = darker (try -4 to -8 to fix blinding)
+  plant_rotation: 180    # 0=none, 90=CW, 180=flip, 270=CCW — try 180 first
+  plant_exposure: -5     # lower = darker, removes blinding (try -4 to -8)
 
 # Gemini API
 gemini:
