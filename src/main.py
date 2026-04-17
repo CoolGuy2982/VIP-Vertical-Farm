@@ -100,13 +100,16 @@ def main():
     grower.actuators.run_pump(10)
     logger.info("Hardware test complete.")
 
-    # ── Camera test — capture both cams and upload to Firebase ───────────────
-    logger.info("Camera test: capturing startup images from both cameras...")
+    # ── Camera test — light on, capture both cams, upload to Firebase ────────
+    logger.info("Camera test: turning light on for photos...")
     grower.firebase.start()  # start worker so uploads are processed
+    grower.actuators.turn_on_lights(5)  # 5 min ceiling; we'll turn it off right after
+    time.sleep(3)  # let light stabilize before capturing
     images = grower.camera.capture_both("startup_test")
+    grower.actuators.turn_off_lights()
     for cam_name, img_path in images.items():
         if img_path:
-            grower.firebase.upload_image(img_path, trigger_type=f"startup_test_{cam_name}")
+            grower.firebase.upload_image(img_path, trigger_type="startup_test_" + cam_name)
             logger.info("Camera test: %s image captured and queued for upload: %s", cam_name, img_path)
         else:
             logger.warning("Camera test: %s camera returned no image", cam_name)

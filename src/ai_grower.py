@@ -102,7 +102,16 @@ class AIGrower:
             # Collect historical plant photos BEFORE capturing new ones
             historical_plant = self.camera.get_recent_plant_images(count=4)
 
+            # Ensure light is on for the plant photo; restore state afterward
+            light_was_off = not self.actuators._light_on
+            if light_was_off:
+                self.actuators.turn_on_lights(5)
+                time.sleep(3)  # let light stabilize
+
             images = self.camera.capture_both(trigger_type)
+
+            if light_was_off:
+                self.actuators.turn_off_lights()
 
             plant_image = images.get("plant")
             dashboard_image = images.get("dashboard")
