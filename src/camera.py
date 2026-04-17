@@ -20,6 +20,8 @@ class Camera:
         self.resolution = tuple(cam_config.get("resolution", [1280, 720]))
         self.image_dir = Path(cam_config.get("image_dir", "data/images"))
         self.image_dir.mkdir(parents=True, exist_ok=True)
+        # Negative value = auto exposure. Set in config to override (e.g. -6 to darken).
+        self.plant_exposure = cam_config.get("plant_exposure", None)
 
     def capture_plant(self, label: str = "checkin") -> str | None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -46,6 +48,9 @@ class Camera:
             cap = cv2.VideoCapture(device_index)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
+            if cam_name == "plant" and self.plant_exposure is not None:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)  # 1 = manual mode
+                cap.set(cv2.CAP_PROP_EXPOSURE, self.plant_exposure)
 
             for _ in range(5):
                 cap.read()
@@ -56,6 +61,10 @@ class Camera:
             if not ret:
                 logger.error("%s cam (index %d) returned no frame", cam_name, device_index)
                 return None
+
+            # Rotation correction for plant camera (mount orientation)
+            if cam_name == "plant":
+                frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
 
 
             cv2.imwrite(str(filepath), frame)
