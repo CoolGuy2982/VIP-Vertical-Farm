@@ -17,6 +17,11 @@ if [[ "$confirm" != "yes" ]]; then
 fi
 
 echo ""
+echo "Syncing system clock..."
+sudo timedatectl set-ntp true
+echo "  Clock sync OK"
+
+echo ""
 echo "Clearing log files..."
 > data/logs/decisions.jsonl
 > data/logs/sensor_log.jsonl

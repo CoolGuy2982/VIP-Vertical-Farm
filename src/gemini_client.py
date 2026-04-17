@@ -1,4 +1,3 @@
-import base64
 import logging
 import os
 from pathlib import Path
@@ -6,6 +5,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types
 
 load_dotenv()
 
@@ -292,20 +292,19 @@ GROWER_TOOLS = [
 ]
 
 
-def _build_tool_declarations() -> list[dict]:
-    return [
-        {
-            "type": "function",
-            "name": t["name"],
-            "description": t["description"],
-            "parameters": t["parameters"],
-        }
+def _build_tools() -> list[types.Tool]:
+    return [types.Tool(function_declarations=[
+        types.FunctionDeclaration(
+            name=t["name"],
+            description=t["description"],
+            parameters=t["parameters"],
+        )
         for t in GROWER_TOOLS
-    ]
+    ])]
 
 
 def _clean_result(obj):
-    """Strip empty lists, dicts, and None values so the API doesn't choke."""
+    """Strip None, empty lists, and empty dicts so Gemini doesn't choke."""
     if isinstance(obj, dict):
         return {k: _clean_result(v) for k, v in obj.items()
                 if v is not None and v != [] and v != {}}
@@ -317,18 +316,43 @@ def _clean_result(obj):
 class GeminiClient:
     def __init__(self, config: dict):
         self.config = config
-        gemini_config = config.get("gemini", {})
+        gemini_cfg = config.get("gemini", {})
 
         api_key = os.environ.get("GEMINI_API_KEY", "")
         self.client = genai.Client(api_key=api_key) if api_key else genai.Client()
 
-        self.model = gemini_config.get("model", "gemini-3-flash-preview")
-        self.max_tokens = gemini_config.get("max_output_tokens", 4096)
-        self.thinking = gemini_config.get("thinking", True)
+        self.model      = gemini_cfg.get("model", "gemini-3-flash-preview")
+        self.max_tokens = gemini_cfg.get("max_output_tokens", 4096)
+        self.thinking   = gemini_cfg.get("thinking", True)
 
-        self._last_interaction_id: Optional[str] = None
-        self._chain_length = 0
-        self._max_chain_length = 20
+        # Accumulated conversation for the current tool loop.
+        # Reset at the start of each create_interaction call.
+        self._contents: list[types.Content] = []
+        self._system_instruction: str = ""
+        self._use_tools: bool = True
+
+    # ── Internal helpers ──────────────────────────────────────────────────────
+
+    def _make_config(self, system_instruction: str, use_tools: bool) -> types.GenerateContentConfig:
+        kwargs: dict = {
+            "system_instruction": system_instruction,
+            "max_output_tokens": self.max_tokens,
+        }
+        if use_tools:
+            kwargs["tools"] = _build_tools()
+        if self.thinking:
+            # -1 = dynamic budget (model decides how much to think)
+            kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)
+        return types.GenerateContentConfig(**kwargs)
+
+    def _call(self) -> types.GenerateContentResponse:
+        return self.client.models.generate_content(
+            model=self.model,
+            contents=self._contents,
+            config=self._make_config(self._system_instruction, self._use_tools),
+        )
+
+    # ── Public interface (matches what ai_grower._run_tool_loop expects) ──────
 
     def create_interaction(
         self,
@@ -336,111 +360,92 @@ class GeminiClient:
         user_message: str,
         image_paths: Optional[list[str]] = None,
         use_tools: bool = True,
-        continue_chain: bool = True,
-    ):
-        input_parts = []
+        continue_chain: bool = True,   # kept for API compat, no longer used
+    ) -> types.GenerateContentResponse:
+        """Start a fresh generate_content conversation and return the first response."""
+        parts: list[types.Part] = []
 
         for image_path in (image_paths or []):
             if image_path and Path(image_path).exists():
                 with open(image_path, "rb") as f:
-                    image_data = base64.b64encode(f.read()).decode("utf-8")
+                    image_bytes = f.read()
                 ext = Path(image_path).suffix.lower()
                 mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                             ".png": "image/png", ".webp": "image/webp"}
                 mime_type = mime_map.get(ext, "image/jpeg")
-                input_parts.append({"type": "image", "mime_type": mime_type, "data": image_data})
+                parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime_type))
 
-        input_parts.append({"type": "text", "text": user_message})
+        parts.append(types.Part.from_text(text=user_message))
 
-        previous_id = None
-        if continue_chain and self._last_interaction_id:
-            if self._chain_length < self._max_chain_length:
-                previous_id = self._last_interaction_id
+        self._system_instruction = system_instruction
+        self._use_tools = use_tools
+        self._contents = [types.Content(role="user", parts=parts)]
 
-        kwargs = {
-            "model": self.model,
-            "input": input_parts,
-            "system_instruction": system_instruction,
-            "generation_config": {"max_output_tokens": self.max_tokens},
-        }
+        logger.info("Gemini generate_content (model=%s, tools=%s)", self.model, use_tools)
+        response = self._call()
 
-        if use_tools:
-            kwargs["tools"] = _build_tool_declarations()
-
-        if previous_id:
-            kwargs["previous_interaction_id"] = previous_id
-
-        if self.thinking:
-            kwargs["generation_config"]["thinking_level"] = "high"
-            kwargs["generation_config"]["thinking_summaries"] = "auto"
-
-        logger.info("Gemini interaction (chain=%d, model=%s)", self._chain_length, self.model)
-        interaction = self.client.interactions.create(**kwargs)
-
-        self._last_interaction_id = interaction.id
-        self._chain_length += 1
-        return interaction
+        # Append model turn to history so the next submit_tool_results continues correctly
+        self._contents.append(response.candidates[0].content)
+        return response
 
     def submit_tool_results(
         self,
-        interaction_id: str,
+        interaction_id: Optional[str],   # kept for API compat, not used
         tool_results: list[dict],
         system_instruction: str,
-    ):
-        input_parts = []
+    ) -> types.GenerateContentResponse:
+        """Append function responses to the conversation and get the next model turn."""
+        parts: list[types.Part] = []
         for result in tool_results:
             raw = result["result"]
-            cleaned = _clean_result(raw) if isinstance(raw, dict) else {"result": raw}
-            input_parts.append({
-                "type": "function_result",
-                "call_id": result["call_id"],
-                "name": result["name"],
-                "result": cleaned,
-            })
+            cleaned = _clean_result(raw) if isinstance(raw, dict) else {"result": str(raw)}
+            parts.append(types.Part.from_function_response(
+                name=result["name"],
+                response=cleaned,
+            ))
 
-        interaction = self.client.interactions.create(
-            model=self.model,
-            input=input_parts,
-            previous_interaction_id=interaction_id,
-            system_instruction=system_instruction,
-            tools=_build_tool_declarations(),
-            generation_config={"max_output_tokens": self.max_tokens},
-        )
+        self._contents.append(types.Content(role="user", parts=parts))
 
-        self._last_interaction_id = interaction.id
-        self._chain_length += 1
-        return interaction
+        response = self._call()
+        self._contents.append(response.candidates[0].content)
+        return response
 
     def reset_chain(self):
-        self._last_interaction_id = None
-        self._chain_length = 0
-        logger.info("Interaction chain reset")
+        """Clear conversation history (called after context compression)."""
+        self._contents = []
+        self._system_instruction = ""
+        logger.info("Gemini conversation history cleared")
 
-    def extract_response(self, interaction) -> dict:
-        result = {
+    def extract_response(self, response: types.GenerateContentResponse) -> dict:
+        """Parse a GenerateContentResponse into a flat dict for ai_grower."""
+        result: dict = {
             "text": None,
             "function_calls": [],
             "thoughts": [],
-            "status": interaction.status,
-            "interaction_id": interaction.id,
+            "status": "completed",
+            "interaction_id": None,   # no server-side ID with standard API
         }
 
-        for output in interaction.outputs:
-            if output.type == "text":
-                result["text"] = str(output.text) if output.text else None
-            elif output.type == "thought":
-                if hasattr(output, "summary") and output.summary:
-                    result["thoughts"].append(str(output.summary))
-            elif output.type == "function_call":
-                args = output.arguments
-                if hasattr(args, "model_dump"):
-                    args = args.model_dump()
-                elif hasattr(args, "__dict__") and not isinstance(args, dict):
-                    args = dict(args)
+        if not response.candidates:
+            logger.warning("Gemini returned no candidates")
+            return result
+
+        for part in response.candidates[0].content.parts:
+            # Thinking / reasoning traces
+            if getattr(part, "thought", False):
+                if part.text:
+                    result["thoughts"].append(part.text)
+            # Tool calls
+            elif part.function_call:
+                fn = part.function_call
+                args = dict(fn.args) if fn.args else {}
                 result["function_calls"].append({
-                    "id": str(output.id),
-                    "name": str(output.name),
-                    "arguments": args if isinstance(args, dict) else {},
+                    "id":        getattr(fn, "id", "") or "",
+                    "name":      fn.name,
+                    "arguments": args,
                 })
+            # Text response
+            elif part.text:
+                result["text"] = (result["text"] or "") + part.text
 
         return result
