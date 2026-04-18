@@ -155,7 +155,7 @@ class FirebaseSync:
             return
 
         filename = Path(local_path).name
-        remote_path = f"grows/{self.device_id}/images/{filename}"
+        remote_path = f"grows/{self.device_id}/images2/{filename}"
 
         blob = self.bucket.blob(remote_path)
         blob.upload_from_filename(local_path, content_type="image/jpeg")
