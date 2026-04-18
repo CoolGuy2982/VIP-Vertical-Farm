@@ -88,32 +88,31 @@ def main():
         except Exception as e:
             logger.warning("Kasa cloud check failed: %s", e)
 
-    import Jetson.GPIO as GPIO
-
     light_pin = config.get("gpio", {}).get("grow_light_pin", "?")
 
-    # ── Camera test — light on first, then test hardware, then turn off ───────
-    grower.firebase.start()
-    logger.info("Startup: turning light ON (pin %s) for camera test...", light_pin)
-    GPIO.output(grower.actuators.light_pin, GPIO.LOW)  # Active-Low: LOW = ON
-    grower.actuators._light_on = True
-    time.sleep(5)  # let light fully stabilize
-    logger.info("Startup: capturing camera test images with light ON...")
-    images = grower.camera.capture_both("startup_test")
-    for cam_name, img_path in images.items():
-        if img_path:
-            grower.firebase.upload_image(img_path, trigger_type="startup_test_" + cam_name)
-            logger.info("Startup: %s image captured -> %s", cam_name, img_path)
-        else:
-            logger.warning("Startup: %s camera returned no image", cam_name)
-
-    # ── Hardware relay test ───────────────────────────────────────────────────
-    logger.info("Hardware test: Light relay (BOARD pin %s) — already ON, turning OFF now", light_pin)
+    # ── Hardware tests ────────────────────────────────────────────────────────
+    logger.info("Hardware test: Light relay (BOARD pin %s) ON for 10 s...", light_pin)
+    grower.actuators.turn_on_lights(10 / 60)
+    time.sleep(10)
     grower.actuators.turn_off_lights()
 
     logger.info("Hardware test: Pump ('%s' via Kasa cloud) ON for 10 s...", device_alias)
     grower.actuators.run_pump(10)
-    logger.info("Hardware test complete. Check Firebase Storage to verify camera image quality.")
+    logger.info("Hardware test complete.")
+
+    # ── Camera test — light ON, 30 dummy frames let auto-exposure settle ─────
+    grower.firebase.start()
+    logger.info("Camera test: light on, capturing startup images...")
+    grower.actuators.turn_on_lights(5)
+    images = grower.camera.capture_both("startup_test")
+    grower.actuators.turn_off_lights()
+    for cam_name, img_path in images.items():
+        if img_path:
+            grower.firebase.upload_image(img_path, trigger_type="startup_test_" + cam_name)
+            logger.info("Camera test: %s -> %s", cam_name, img_path)
+        else:
+            logger.warning("Camera test: %s camera returned no image", cam_name)
+    logger.info("Camera test done. Check Firebase Storage to verify image quality.")
 
     def shutdown(signum, frame):
         logger.info("Shutdown received")

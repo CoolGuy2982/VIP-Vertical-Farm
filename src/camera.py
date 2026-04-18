@@ -49,7 +49,7 @@ class Camera:
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
 
-            for _ in range(5):
+            for _ in range(30):
                 cap.read()
 
             ret, frame = cap.read()
