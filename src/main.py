@@ -104,6 +104,7 @@ def main():
     grower.firebase.start()
     logger.info("Camera test: light on, capturing startup images...")
     grower.actuators.turn_on_lights(5)
+    time.sleep(20)  # let camera auto-exposure fully settle
     images = grower.camera.capture_both("startup_test")
     grower.actuators.turn_off_lights()
     for cam_name, img_path in images.items():

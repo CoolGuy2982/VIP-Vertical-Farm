@@ -106,6 +106,7 @@ class AIGrower:
             light_was_off = not self.actuators._light_on
             if light_was_off:
                 self.actuators.turn_on_lights(5)
+                time.sleep(20)  # let camera auto-exposure fully settle
 
             images = self.camera.capture_both(trigger_type)
 
