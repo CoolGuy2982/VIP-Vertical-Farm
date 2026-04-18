@@ -64,7 +64,7 @@ camera:
   plant_cam_index: 0        # USB webcam pointed at the plant
   dashboard_cam_index: 2    # USB webcam pointed at the tent dashboard
   resolution: [1280, 720]
-  image_dir: "data/images"
+  image_dir: "data/images2"
   plant_rotation: 90    # 0=none, 90=CW, 180=flip, 270=CCW
 
 # Gemini API
