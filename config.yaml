@@ -46,7 +46,7 @@ gpio:
 # Credentials are in .env (KASA_USERNAME / KASA_PASSWORD)
 # device_alias must exactly match the name shown in the Kasa mobile app
 kasa_cloud:
-  device_alias: "Water Pump"
+  device_alias: "water-pump"
 
 # No hardware sensors -- the AI reads values from the tent dashboard camera
 
