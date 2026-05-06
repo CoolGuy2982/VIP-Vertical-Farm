@@ -17,6 +17,32 @@ logger = logging.getLogger(__name__)
 
 MAX_TOOL_ROUNDS = 15
 
+# Caps for fields persisted into decisions.jsonl. Each saved decision used to
+# carry the full system_prompt + user_raw_message (5-30KB each) which the next
+# checkin's user message then snapshotted again — a recursive doubling that
+# pushed the compression prompt past Gemini's 1M token ceiling.
+MAX_THOUGHT_CHARS = 1500
+MAX_RESPONSE_CHARS = 3000
+MAX_TOOL_RESULT_CHARS = 800
+
+# Compression bounds: never feed more than this many recent decisions into the
+# summarizer. The growth_summary itself absorbs older history.
+MAX_DECISIONS_TO_COMPRESS = 40
+
+
+def _is_token_limit_error(exc: BaseException) -> bool:
+    """Detect Gemini's '400 INVALID_ARGUMENT, input token count exceeds...' error.
+
+    google.genai raises errors.ClientError; we don't import it here to avoid a
+    hard dependency in unit tests, so we match by attribute and message instead.
+    """
+    msg = str(exc).lower()
+    code = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+    if code in (400,) and ("token count" in msg or "tokens allowed" in msg):
+        return True
+    # Fallback: pattern match the message even without the code attribute
+    return "input token count exceeds" in msg or "exceeds the maximum number of tokens" in msg
+
 
 class AIGrower:
     def __init__(self, config: dict, base_dir: str):
@@ -129,59 +155,27 @@ class AIGrower:
             pending = self.scheduler.get_pending()
 
             if self.context.needs_compression():
-                self._compress_context()
+                try:
+                    self._compress_context()
+                except Exception as e:
+                    if _is_token_limit_error(e):
+                        logger.warning("Compression hit token limit, skipping this round: %s", e)
+                    else:
+                        raise
 
             system_prompt = self.context.build_system_prompt()
-            context_msg = self.context.build_context_message(
-                sensor_data, sensor_trends,
-                pending_actions=pending,
+
+            response, user_message = self._call_with_token_fallback(
+                trigger_type=trigger_type,
                 trigger_context=trigger_context,
+                sensor_data=sensor_data,
+                sensor_trends=sensor_trends,
+                pending=pending,
+                historical_plant=historical_plant,
+                plant_image=plant_image,
+                dashboard_image=dashboard_image,
+                system_prompt=system_prompt,
             )
-
-            # Build ordered image list and labels: historical plant photos → current plant → dashboard
-            all_images: list[str] = []
-            image_labels: list[str] = []
-
-            for i, (path, ts) in enumerate(historical_plant):
-                all_images.append(path)
-                image_labels.append(f"Image {i+1}: historical plant photo from {ts}")
-
-            idx = len(historical_plant) + 1
-            if plant_image:
-                all_images.append(plant_image)
-                image_labels.append(f"Image {idx}: CURRENT plant photo (just taken now)")
-                idx += 1
-            if dashboard_image:
-                all_images.append(dashboard_image)
-                image_labels.append(
-                    f"Image {idx}: CURRENT dashboard camera (just taken now) — "
-                    "read every value shown and call report_sensors"
-                )
-
-            image_note = "\n".join(image_labels)
-
-            if trigger_type == "observe":
-                user_message = (
-                    f"{context_msg}\n\n---\n\n"
-                    f"{image_note}\n"
-                    f"This is the OBSERVATION RESULT you scheduled. "
-                    f"Analyze what changed, whether your hypothesis was correct, "
-                    f"and what you learned. Update your mental model of this setup. "
-                    f"Take any follow-up actions needed and schedule your next check-in."
-                )
-            else:
-                user_message = (
-                    f"{context_msg}\n\n---\n\n"
-                    f"{image_note}\n"
-                    f"Time for your check-in. Read the dashboard image for sensor values "
-                    f"and call report_sensors. Examine the plant image for health. "
-                    f"Apply your agricultural expertise: assess VPD, check moisture trends, "
-                    f"look for stress signals. Take precise, measured actions. "
-                    f"Use observe_in to close feedback loops on any action you take. "
-                    f"Schedule your next check-in."
-                )
-
-            response = self._run_tool_loop(system_prompt, user_message, all_images)
 
             elapsed = time.time() - checkin_start
             self._log_decision(
@@ -197,6 +191,126 @@ class AIGrower:
 
         finally:
             self._checkin_lock = False
+
+    def _build_checkin_payload(self, *, level: int, trigger_type: str,
+                               trigger_context: str | None,
+                               sensor_data: dict, sensor_trends: dict,
+                               pending: list,
+                               historical_plant: list,
+                               plant_image: str | None,
+                               dashboard_image: str | None) -> tuple[str, list[str]]:
+        """Build (user_message, image_paths) at a given context-reduction level.
+
+        Level 0 = full context (all images, full history).
+        Level 1 = drop historical plant photos.
+        Level 2 = also drop recent decisions, milestones, sensor trends.
+        Level 3 = minimal safety check-in: only current sensors + current images,
+                  with a note that history was elided.
+        """
+        if level >= 2:
+            # Hand-rolled stripped context — bypass build_context_message.
+            day = self.context.get_days_since_planting()
+            parts = []
+            if trigger_context:
+                parts.append(f"## Trigger Context\n{trigger_context}\n")
+            if level >= 3:
+                parts.append(
+                    "## NOTICE\nPrior context was too large to include. "
+                    "Treat this as a fresh check-in. Read the dashboard image, "
+                    "report sensors, assess the plant from the current photo, "
+                    "and schedule the next check-in.\n"
+                )
+            else:
+                parts.append(
+                    "## NOTICE\nFull history was trimmed to fit within the model's "
+                    "context limit. Rely on the summary below and current state.\n"
+                )
+            summary = self.context.get_growth_summary()
+            parts.append("## Grow History Summary")
+            parts.append(summary.get("summary", "No history yet."))
+            parts.append(f"\n## Current State - Day {day} - "
+                         f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            for key, val in sensor_data.items():
+                if key not in ("timestamp", "errors"):
+                    parts.append(f"- {key}: {val}")
+            context_msg = "\n".join(parts)
+        else:
+            context_msg = self.context.build_context_message(
+                sensor_data, sensor_trends,
+                pending_actions=pending,
+                trigger_context=trigger_context,
+            )
+
+        all_images: list[str] = []
+        image_labels: list[str] = []
+
+        if level == 0:
+            for i, (path, ts) in enumerate(historical_plant):
+                all_images.append(path)
+                image_labels.append(f"Image {i+1}: historical plant photo from {ts}")
+
+        idx = len(all_images) + 1
+        if plant_image:
+            all_images.append(plant_image)
+            image_labels.append(f"Image {idx}: CURRENT plant photo (just taken now)")
+            idx += 1
+        if dashboard_image:
+            all_images.append(dashboard_image)
+            image_labels.append(
+                f"Image {idx}: CURRENT dashboard camera (just taken now) — "
+                "read every value shown and call report_sensors"
+            )
+
+        image_note = "\n".join(image_labels)
+
+        if trigger_type == "observe" and level < 3:
+            tail = (
+                "This is the OBSERVATION RESULT you scheduled. "
+                "Analyze what changed, whether your hypothesis was correct, "
+                "and what you learned. Update your mental model of this setup. "
+                "Take any follow-up actions needed and schedule your next check-in."
+            )
+        else:
+            tail = (
+                "Time for your check-in. Read the dashboard image for sensor values "
+                "and call report_sensors. Examine the plant image for health. "
+                "Apply your agricultural expertise: assess VPD, check moisture trends, "
+                "look for stress signals. Take precise, measured actions. "
+                "Use observe_in to close feedback loops on any action you take. "
+                "Schedule your next check-in."
+            )
+
+        user_message = f"{context_msg}\n\n---\n\n{image_note}\n{tail}"
+        return user_message, all_images
+
+    def _call_with_token_fallback(self, **kwargs) -> tuple[dict, str]:
+        """Try the check-in at progressively smaller context sizes.
+
+        Returns (response, user_message_used). Re-raises any non-token error.
+        """
+        system_prompt = kwargs.pop("system_prompt")
+        last_error: Exception | None = None
+        for level in range(4):
+            user_message, all_images = self._build_checkin_payload(level=level, **kwargs)
+            try:
+                response = self._run_tool_loop(system_prompt, user_message, all_images)
+                if level > 0:
+                    logger.warning(
+                        "Check-in succeeded at fallback level %d (context was reduced)",
+                        level,
+                    )
+                return response, user_message
+            except Exception as e:
+                if not _is_token_limit_error(e):
+                    raise
+                last_error = e
+                logger.warning(
+                    "Token limit hit at level %d; escalating to level %d",
+                    level, level + 1,
+                )
+        raise RuntimeError(
+            f"Check-in failed even at minimal context level: {last_error}"
+        ) from last_error
 
     def _run_tool_loop(self, system_prompt: str, user_message: str,
                        image_paths: list[str] | None = None) -> dict:
@@ -354,7 +468,9 @@ class AIGrower:
 
             elif name == "get_decision_log":
                 count = arguments.get("count", 10)
-                return {"decisions": self.context.get_recent_decisions(count)}
+                raw = self.context.get_recent_decisions(count)
+                slim = [ContextManager._slim_decision_for_prompt(d) for d in raw]
+                return {"decisions": slim}
 
             elif name == "emergency_alert":
                 return self._record_alert(
@@ -373,22 +489,33 @@ class AIGrower:
                       elapsed: float, trigger_type: str,
                       system_prompt: str, user_raw_message: str):
         text = response["text"] or ""
+        thoughts_joined = "\n".join(response["thoughts"]) if response["thoughts"] else ""
+
+        # Trim per-action results so a chatty tool call doesn't bloat the row.
+        slim_actions = []
+        for a in response["actions"]:
+            result = a.get("result")
+            if isinstance(result, dict):
+                result_str = json.dumps(result)
+            else:
+                result_str = str(result) if result is not None else ""
+            if len(result_str) > MAX_TOOL_RESULT_CHARS:
+                result_str = result_str[:MAX_TOOL_RESULT_CHARS] + "...[truncated]"
+            slim_actions.append({"tool": a["tool"], "args": a["args"], "result": result_str})
+
         decision = {
             "timestamp": datetime.now().isoformat(),
             "interaction_id": response.get("interaction_id"),
             "day": self.context.get_days_since_planting(),
             "trigger_type": trigger_type,
-            "system_prompt": system_prompt,
-            "user_raw_message": user_raw_message,
             "sensors": {k: v for k, v in sensors.items()
                         if k not in ("timestamp", "errors")},
             "observation": self._extract_section(text, "Observation"),
             "reasoning": self._extract_section(text, "Hypothesis"),
             "outcome": self._extract_section(text, "Feedback Loop"),
-            "actions": [{"tool": a["tool"], "args": a["args"], "result": a.get("result")}
-                        for a in response["actions"]],
-            "full_response": text,
-            "thoughts": response["thoughts"],
+            "actions": slim_actions,
+            "full_response": text[:MAX_RESPONSE_CHARS],
+            "thoughts_summary": thoughts_joined[:MAX_THOUGHT_CHARS],
             "elapsed_seconds": round(elapsed, 1),
         }
         self.context.log_decision(decision)
@@ -414,7 +541,7 @@ class AIGrower:
 
     def _compress_context(self):
         logger.info("Compressing context history...")
-        prompt = self.context.build_compression_prompt()
+        prompt = self.context.build_compression_prompt(max_decisions=MAX_DECISIONS_TO_COMPRESS)
         interaction = self.gemini.create_interaction(
             system_instruction=(
                 "You are a data analyst summarizing plant growth history. "

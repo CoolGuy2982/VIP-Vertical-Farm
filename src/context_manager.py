@@ -161,6 +161,28 @@ class ContextManager:
                 }
         return trends
 
+    @staticmethod
+    def _slim_decision_for_prompt(d: dict) -> dict:
+        # Keep only fields useful for downstream reasoning. Drop bulky
+        # system_prompt / user_raw_message / full_response / thoughts that
+        # legacy records may still contain on disk.
+        actions = []
+        for a in d.get("actions", []) or []:
+            actions.append({
+                "tool": a.get("tool"),
+                "args": a.get("args"),
+            })
+        return {
+            "timestamp": d.get("timestamp"),
+            "day": d.get("day"),
+            "trigger_type": d.get("trigger_type"),
+            "sensors": d.get("sensors"),
+            "observation": d.get("observation"),
+            "reasoning": d.get("reasoning"),
+            "outcome": d.get("outcome"),
+            "actions": actions,
+        }
+
     # context assembly
 
     def get_days_since_planting(self) -> int:
@@ -385,10 +407,17 @@ The observe_in tool is your most powerful learning tool. Use it aggressively.
 
         return "\n".join(parts)
 
-    def build_compression_prompt(self) -> str:
+    def build_compression_prompt(self, max_decisions: int = 40) -> str:
         all_decisions = self.get_all_decisions()
+        # Only summarize the most recent slice — older history is already
+        # absorbed into current_summary. Sending the full log here used to push
+        # the compression call past Gemini's 1M token ceiling.
+        recent_decisions = all_decisions[-max_decisions:]
         milestones = self.get_milestones()
         current_summary = self.get_growth_summary()
+
+        slim_decisions = [self._slim_decision_for_prompt(d) for d in recent_decisions]
+        slim_milestones = milestones[-30:]
 
         return f"""You are reviewing your own growing history to write a compressed summary.
 This summary will be your memory going forward, so make it useful.
@@ -396,11 +425,11 @@ This summary will be your memory going forward, so make it useful.
 ## Current Summary
 {current_summary.get('summary', 'None yet.')}
 
-## All Milestones
-{json.dumps(milestones, indent=2)}
+## Recent Milestones (last {len(slim_milestones)})
+{json.dumps(slim_milestones, indent=2)}
 
-## Full Decision Log ({len(all_decisions)} decisions)
-{json.dumps(all_decisions, indent=2)}
+## Recent Decision Log ({len(slim_decisions)} of {len(all_decisions)} total decisions; older history is already in the summary above)
+{json.dumps(slim_decisions, indent=2)}
 
 ## Your Task
 Write an updated summary that captures:

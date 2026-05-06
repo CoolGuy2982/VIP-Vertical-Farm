@@ -6,7 +6,11 @@
       "WebFetch(domain:github.com)",
       "WebSearch",
       "WebFetch(domain:developer.ridgerun.com)",
-      "WebFetch(domain:pypi.org)"
+      "WebFetch(domain:pypi.org)",
+      "Bash(awk 'NR==1 {print length\\($0\\)}' c:/Users/omkar/OneDrive/Documents/GitHub/VIP-Vertical-Farm/data/logs/decisions.jsonl)",
+      "Bash(awk 'NR==2 {print length\\($0\\)}' c:/Users/omkar/OneDrive/Documents/GitHub/VIP-Vertical-Farm/data/logs/decisions.jsonl)",
+      "Bash(python -c ' *)",
+      "Bash(python -m py_compile src/ai_grower.py src/context_manager.py)"
     ]
   }
 }
