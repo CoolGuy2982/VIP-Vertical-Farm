@@ -60,9 +60,20 @@ light:
   max_on_minutes: 1440       # 24h max (safety cap)
 
 # Cameras (two USB webcams)
+# On the Pi, /dev/videoN numbers move around (replugging, boot order, and each
+# webcam also creates an extra metadata node that never returns frames).
+# Prefer stable paths: run `python diagnose_cameras.py` on the Pi, then set e.g.
+#   plant_cam: "/dev/v4l/by-id/usb-<plant camera>-video-index0"
+#   dashboard_cam: "/dev/v4l/by-id/usb-<dashboard camera>-video-index0"
+# (If both webcams are the same model with no serial number, use the
+#  /dev/v4l/by-path/... entries instead -- those are tied to the USB port.)
+# plant_cam / dashboard_cam override the *_index values below when set.
 camera:
   plant_cam_index: 2        # USB webcam pointed at the plant
   dashboard_cam_index: 0    # USB webcam pointed at the tent dashboard
+  mjpg: true                # compressed stream; needed for 2 webcams on Pi USB
+  warmup_frames: 15
+  retries: 2
   resolution: [1280, 720]
   image_dir: "data/images"
   plant_rotation: 270    # 0=none, 90=CW, 180=flip, 270=CCW
