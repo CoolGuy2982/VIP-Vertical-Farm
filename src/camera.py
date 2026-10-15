@@ -88,7 +88,7 @@ class Camera:
 
     # One capture at a time: the scheduler thread and the API threadpool can both
     # ask for photos, and a webcam that is already open elsewhere returns nothing.
-    _capture_lock = threading.Lock()
+    _capture_lock = threading.RLock()
 
     def __init__(self, config: dict, base_dir: str | Path | None = None):
         cam_config = config.get("camera", {})
@@ -109,6 +109,43 @@ class Camera:
         self.image_dir.mkdir(parents=True, exist_ok=True)
         # Rotation: 0=none, 90=clockwise, 180=flip, 270=counter-clockwise
         self.plant_rotation = cam_config.get("plant_rotation", 0)
+        # Cameras held open for the website live view: device -> cv2.VideoCapture
+        self._streams: dict = {}
+        # Per-camera health, reported to the website
+        self.health = {name: self._empty_health(name) for name in ("plant", "dashboard")}
+
+    def _device_for(self, cam_name: str):
+        return self.plant_device if cam_name == "plant" else self.dashboard_device
+
+    def _empty_health(self, cam_name: str) -> dict:
+        return {"device": str(self._device_for(cam_name)), "ok": None,
+                "last_ok_at": None, "last_error": None, "last_error_at": None,
+                "consecutive_failures": 0}
+
+    def _mark(self, cam_name: str, ok: bool, error: str | None = None):
+        h = self.health.setdefault(cam_name, self._empty_health(cam_name))
+        h["device"] = str(self._device_for(cam_name))
+        now = datetime.now().isoformat(timespec="seconds")
+        h["ok"] = ok
+        if ok:
+            h["last_ok_at"] = now
+            h["consecutive_failures"] = 0
+        else:
+            h["last_error"] = error
+            h["last_error_at"] = now
+            h["consecutive_failures"] = h.get("consecutive_failures", 0) + 1
+
+    def set_devices(self, plant=None, dashboard=None, plant_rotation=None):
+        """Change camera devices / rotation at runtime (from the website)."""
+        with self._capture_lock:
+            self.stop_streams()
+            if plant is not None:
+                self.plant_device = self.plant_index = self._parse_device(plant)
+            if dashboard is not None:
+                self.dashboard_device = self.dashboard_index = self._parse_device(dashboard)
+            if plant_rotation is not None:
+                self.plant_rotation = int(plant_rotation)
+            self.health = {n: self._empty_health(n) for n in ("plant", "dashboard")}
 
     @staticmethod
     def _parse_device(value):
@@ -166,8 +203,22 @@ class Camera:
         return cap
 
     def _read_one(self, device, cam_name: str):
+        stream = self._streams.get(device)
+        if stream is not None:
+            # Live view already has this camera open: reuse it (flush stale frames).
+            frame = None
+            for _ in range(3):
+                ok, f = stream.read()
+                if ok:
+                    frame = f
+            if frame is None:
+                self._last_reason = "live-view stream returned no frame"
+                logger.error("%s cam (%s) live stream returned no frame", cam_name, device)
+            return frame
         cap = self._open(device)
         if cap is None:
+            self._last_reason = ("could not be opened -- unplugged, wrong device, "
+                                 "or in use by another program")
             logger.error("%s cam (%s) could not be opened -- unplugged, wrong device, "
                          "or in use by another process", cam_name, device)
             return None
@@ -178,6 +229,8 @@ class Camera:
                 good += bool(ok)
             ok, frame = cap.read()
             if not ok or frame is None:
+                self._last_reason = ("opened but returned no picture (power, USB bandwidth, "
+                                     "or wrong /dev/video node)")
                 logger.error("%s cam (%s) opened but returned no frame (%d/%d warm-up "
                              "frames ok)", cam_name, device, good, self.warmup_frames)
                 return None
@@ -191,11 +244,13 @@ class Camera:
 
         with self._capture_lock:
             frame = None
+            self._last_reason = None
             for attempt in range(1, self.retries + 2):
                 try:
                     frame = self._read_one(device, cam_name)
                 except Exception as e:
                     logger.error("%s cam error: %s", cam_name, e)
+                    self._last_reason = str(e)
                     frame = None
                 if frame is not None:
                     break
@@ -203,27 +258,81 @@ class Camera:
                     time.sleep(1.5)
 
             if frame is None:
+                self._mark(cam_name, False, f"{cam_name} camera ({device}) "
+                           f"{self._last_reason or 'failed'}")
                 self._log_available_devices(cam_name, device)
                 return None
 
             try:
-                if cam_name == "plant" and self.plant_rotation != 0:
-                    _rot_map = {
-                        90:  cv2.ROTATE_90_CLOCKWISE,
-                        180: cv2.ROTATE_180,
-                        270: cv2.ROTATE_90_COUNTERCLOCKWISE,
-                    }
-                    if self.plant_rotation in _rot_map:
-                        frame = cv2.rotate(frame, _rot_map[self.plant_rotation])
-
+                frame = self._rotate(cam_name, frame)
                 if not cv2.imwrite(str(filepath), frame):
                     logger.error("%s photo could not be written to %s", cam_name, filepath)
+                    self._mark(cam_name, False, f"could not save photo to {filepath}")
                     return None
                 logger.info("%s photo saved: %s", cam_name, filepath)
+                self._mark(cam_name, True)
                 return str(filepath)
             except Exception as e:
                 logger.error("%s cam error: %s", cam_name, e)
+                self._mark(cam_name, False, str(e))
                 return None
+
+    def _rotate(self, cam_name: str, frame):
+        if cam_name == "plant" and self.plant_rotation:
+            _rot_map = {
+                90:  cv2.ROTATE_90_CLOCKWISE,
+                180: cv2.ROTATE_180,
+                270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+            }
+            if self.plant_rotation in _rot_map:
+                frame = cv2.rotate(frame, _rot_map[self.plant_rotation])
+        return frame
+
+    # ------------------------------------------------------------- live view
+
+    def start_stream(self, cam_name: str) -> bool:
+        """Keep a camera open so the live view can read frames quickly."""
+        if not CV2_AVAILABLE:
+            return False
+        device = self._device_for(cam_name)
+        with self._capture_lock:
+            if device in self._streams:
+                return True
+            cap = self._open(device)
+            if cap is None:
+                self._mark(cam_name, False, f"{cam_name} camera ({device}) could not be "
+                           "opened for live view")
+                return False
+            for _ in range(5):
+                cap.read()
+            self._streams[device] = cap
+            return True
+
+    def read_stream_frame(self, cam_name: str):
+        """Next live-view frame (rotated), or None. Re-opens the camera on failure."""
+        device = self._device_for(cam_name)
+        with self._capture_lock:
+            cap = self._streams.get(device)
+            if cap is None:
+                return None
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                cap.release()
+                self._streams.pop(device, None)
+                self._mark(cam_name, False, f"{cam_name} camera ({device}) stopped sending "
+                           "frames during live view")
+                return None
+            self._mark(cam_name, True)
+            return self._rotate(cam_name, frame)
+
+    def stop_streams(self):
+        with self._capture_lock:
+            for cap in self._streams.values():
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+            self._streams.clear()
 
     @staticmethod
     def _log_available_devices(cam_name: str, device) -> None:

@@ -53,7 +53,14 @@ kasa_cloud:
 # Water pump calibration
 water_pump:
   min_seconds_per_dose: 1
-  max_seconds_per_dose: 60   # Never run longer than 60s in one shot
+  max_seconds_per_dose: 45   # Never run longer than this in one shot (hard cap 60 in code)
+  # Hard water budget, enforced in Actuators.run_pump (src/water_budget.py).
+  # Rolling 24 h windows, persisted in data/pump_doses.json so restarts don't reset it.
+  # Code ceilings: AI <= 120 s/day, gap >= 30 min, manual <= 300 s/day.
+  budget:
+    ai_max_seconds_per_day: 45         # AI tool calls + scheduled pump actions (~7.5 L at 168 mL/s)
+    ai_min_minutes_between_doses: 180
+    manual_max_seconds_per_day: 120    # website / local API / startup test, counted separately
 
 # Grow light
 light:
@@ -94,6 +101,17 @@ context:
 scheduler:
   min_checkin_minutes: 5
   max_checkin_minutes: 480
+
+# Startup. The pump/light/camera hardware test only runs on a cold start
+# (boot or `systemctl restart`), never on restarts from the website,
+# code/config updates or crash recovery (VFARM_RESTART=1).
+startup:
+  hardware_test: true
+
+# Website remote control (src/remote_control.py, via Firestore)
+remote:
+  live_fps: 1.0
+  github_repo: "https://github.com/CoolGuy2982/VIP-Vertical-Farm.git"
 
 # Local API server
 api:

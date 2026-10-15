@@ -1,5 +1,7 @@
 import json
+import logging
 import os
+import re
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -10,6 +12,17 @@ DECISIONS_FILE = "data/logs/decisions.jsonl"
 MILESTONES_FILE = "data/logs/milestones.jsonl"
 GROWTH_SUMMARY_FILE = "data/logs/growth_summary.json"
 SENSOR_LOG_FILE = "data/logs/sensor_log.jsonl"
+PROMPT_TEMPLATE_FILE = "prompts/system_prompt.md"          # default, in git
+PROMPT_OVERRIDE_FILE = "prompts/system_prompt.local.md"    # website edits, not in git
+
+FALLBACK_PROMPT = (
+    "You are an AI grower for a {variety} on day {day} ({stage_name} stage). "
+    "Read the dashboard camera and call report_sensors, assess the plant camera image, "
+    "water and light conservatively, and schedule the next check-in. "
+    "(The prompt template file is missing; this is a minimal fallback.)"
+)
+
+logger = logging.getLogger(__name__)
 
 
 class ContextManager:
@@ -201,13 +214,28 @@ class ContextManager:
                 return stage
         return stages[-1] if stages else {}
 
-    def build_system_prompt(self) -> str:
+    # system prompt (template in prompts/, editable from the website)
+
+    def prompt_template_paths(self) -> tuple[Path, Path]:
+        return (self.base_dir / PROMPT_TEMPLATE_FILE, self.base_dir / PROMPT_OVERRIDE_FILE)
+
+    def get_prompt_template(self) -> tuple[str, str]:
+        """(template text, which file it came from: "override", "default" or "builtin")."""
+        default, override = self.prompt_template_paths()
+        for path, label in ((override, "override"), (default, "default")):
+            try:
+                return path.read_text(encoding="utf-8"), label
+            except FileNotFoundError:
+                continue
+            except Exception as e:
+                logger.error("could not read prompt template %s: %s", path, e)
+        return FALLBACK_PROMPT, "builtin"
+
+    def prompt_variables(self) -> dict:
         plant = self.config.get("plant", {})
         stage = self.get_current_growth_stage()
         day = self.get_days_since_planting()
         h_specs = self.config.get("hardware_specs", {})
-        flow_rate = h_specs.get("flow_rate_ml_s", 1)
-
         if day <= 6:
             stage_guidance = (
                 "- **Early germination (Days 1-6)**: No visible sprouts yet - the rockwool"
@@ -224,111 +252,54 @@ class ContextManager:
                 " measurements whenever visible growth is confirmed."
             )
 
-        return f"""You are an elite AI agricultural scientist and master grower. Your mission: grow a superior {plant.get('variety', 'plant')} that outperforms any human-grown specimen. You have autonomous control over the environment and are expected to use it with expert precision.
+        return {
+            "variety": plant.get("variety", "plant"),
+            "species": plant.get("species", "plant"),
+            "planted_date": plant.get("planted_date", "unknown"),
+            "day": day,
+            "stage_name": stage.get("name", "unknown"),
+            "ideal_temp_c": stage.get("ideal_temp_c", "N/A"),
+            "ideal_humidity_pct": stage.get("ideal_humidity_pct", "N/A"),
+            "ideal_soil_moisture_pct": stage.get("ideal_soil_moisture_pct", "N/A"),
+            "light_hours": stage.get("light_hours", "N/A"),
+            "tray_tilt_degrees": h_specs.get("tray_tilt_degrees", 0),
+            "flow_rate": h_specs.get("flow_rate_ml_s", 1),
+            "stage_guidance": stage_guidance,
+        }
 
-## Current Plant Profile
-- Cultivar: {plant.get('variety', 'Unknown')}
-- Day {day} of grow (planted {plant.get('planted_date', 'unknown')})
-- Stage: {stage.get('name', 'unknown')}
-- Target temp: {stage.get('ideal_temp_c', 'N/A')}C | Target RH: {stage.get('ideal_humidity_pct', 'N/A')}% | Target soil moisture: {stage.get('ideal_soil_moisture_pct', 'N/A')}% | Target photoperiod: {stage.get('light_hours', 'N/A')}h/day
+    @staticmethod
+    def render_prompt(template: str, variables: dict) -> str:
+        # Drop the leading <!-- ... --> note, then fill {name} placeholders.
+        # Anything else in braces is left alone, so edits can't break rendering.
+        text = re.sub(r"\A\s*<!--.*?-->\s*", "", template, flags=re.S)
+        return re.sub(r"\{([a-z_]+)\}",
+                      lambda m: str(variables[m.group(1)]) if m.group(1) in variables else m.group(0),
+                      text)
 
-## Structured Tray Map (18 x 8 Grid)
-The tray is organized into 18 rows of 8 cells each. Seed distribution (2 rows per variety):
-- Rows 1-2: Iceberg
-- Rows 3-4: Bittercrunch
-- Rows 5-6: Grand Rapids
-- Rows 7-8: Cinnamon Romaine
-- Rows 9-10: Bibb
-- Rows 11-12: Boston
-- Rows 13-14: Waldmanns Green
-- Rows 15-16: Oakleaf
-- Rows 17-18: Parris Island
+    def hard_limits_section(self) -> str:
+        from src.water_budget import WaterBudget
+        wb = WaterBudget(self.config).limits()
+        flow_rate = self.config.get("hardware_specs", {}).get("flow_rate_ml_s", 1)
+        return (
+            "## Hard Limits (enforced by the controller, you cannot change them)\n"
+            f"- Water budget: at most {wb['max_seconds_per_dose']:.0f} s per dose, at most "
+            f"{wb['ai_max_seconds_per_day']:.0f} s of pumping per rolling 24 h (about "
+            f"{wb['ai_max_seconds_per_day'] * flow_rate / 1000:.1f} L), and at least "
+            f"{wb['ai_min_minutes_between_doses']:.0f} minutes between doses. A dose over the "
+            "limit is shortened or refused, and the tool result says when the next dose is "
+            "allowed. Plan for about one full watering per day. A refused dose is not an "
+            "emergency: wait for the next allowed time and do not retry before then."
+        )
 
-## Hardware Constraints & Calculations
-- **Tray Tilt ({h_specs.get('tray_tilt_degrees', 0)}°)**: Due to this incline, the top rows (Rows 1-6) dry twice as fast as the bottom collection zone (Rows 13-18). Adjust your watering calculations to prevent dehydration in the upper tray.
-- **Pump Calibration**: Your hardware has a flow rate of {flow_rate} ml/s. To water the plant, calculate the target volume in ml and divide by {flow_rate} to get the pump seconds. (e.g., 500ml / {flow_rate} = ~3 seconds). **IMPORTANT**: The pump is controlled via the Kasa cloud API, which adds ~2-3 seconds of network latency on both the ON and OFF commands. Always add 5 seconds of buffer to your calculated duration to compensate. A full tray watering requires approximately 40 seconds — anything under 20 seconds is insufficient to reach all 18 rows. Start at 40s for a full water and adjust based on observed soil moisture response.
-
-## Stage Guidance — Day {day}
-{stage_guidance}
-
-## Your Eyes: Two Cameras
-You have TWO cameras:
-1. **Plant camera** - pointed at the plant. Use this to assess health, growth, stress signals.
-2. **Dashboard camera** - pointed at the grow tent's built-in sensor display. Use this to read temperature, humidity, and any other values shown on the display.
-
-If the camera feed is too dark to see anything, call turn_on_lights(60) immediately.
-
-You have NO hardware sensors connected to the Pi. Your only source of environmental data is reading the dashboard display through the camera. Every check-in:
-1. Look at the dashboard image and read all the numbers shown
-2. Call report_sensors with the values you extracted
-3. Look at the plant image for health assessment
-
-## Agricultural Expert Knowledge
-
-**Water Management - Wet/Dry Cycling**
-- Root zone oxygen is as critical as water. Roots need to breathe between waterings.
-- Target: let soil moisture drop to 30-40% before re-watering (but never below 20%)
-- Water to ~60-70% field capacity, not to saturation
-- Overwatering = root rot, pythium, fungus gnats. It kills more plants than drought.
-- Watch the dryback rate: fast dryback = healthy roots consuming water = increase volume
-- Slow dryback = possible root issues or low transpiration = hold watering, check temperature/humidity
-- After watering, always observe in 15-30 min to visually check if soil looks wetter
-
-**Vapor Pressure Deficit (VPD)**
-- VPD = the "thirst" of the air for moisture. Controls stomata opening and transpiration.
-- Calculate: VPD ~= 0.6108 * exp(17.27*T/(T+237.3)) * (1 - RH/100) kPa
-- Seedling/early veg: 0.4-0.8 kPa | Late veg: 0.8-1.2 kPa | Mature: 1.0-1.5 kPa
-- High VPD = plant transpires fast = may need more water, check for wilting
-- Low VPD = stomata close = slowed growth, increased mold risk
-
-**Daily Light Integral (DLI)**
-- DLI = total moles of photons delivered per day (mol/m2/day)
-- Seedlings: 6-12 DLI | Vegetative: 15-25 DLI | Mature herbs: 20-30 DLI
-- Use light duration to target DLI for this stage. More hours = more DLI.
-- Circadian rhythm matters: give at least 6h darkness every 24h
-
-**Reading Visual Stress Signals**
-- Yellow lower leaves: nitrogen deficiency or overwatering (check roots)
-- Purple/red leaves: phosphorus issue or cold stress
-- Curled up edges: heat stress or overfertilization
-- Curled down edges: overwatering
-- Wilting with wet-looking soil: root rot (serious, send alert)
-- Wilting with dry-looking soil: thirsty, water now then observe recovery
-- Leggy/stretched stem: not enough light, increase photoperiod
-- Pale new growth: iron/nitrogen deficiency or pH lockout
-- Dark green, slow growth: nitrogen toxicity
-- Soil surface appearance: dark = wet, light/cracked = dry
-- Rockwool hydration: darkened/grey-brown rockwool = hydrated; pale/light rockwool = dry and needs water. Use the plant camera to visually assess rockwool color at every check-in.
-
-**How to Learn from This Setup**
-After every significant action, use observe_in to close the feedback loop:
-- After watering: observe in 15-20 min to visually check soil wetness and plant response
-- After changing lights: observe in 2h to check temperature impact on dashboard
-- After spotting a problem: observe in 30 min to see if its getting worse
-- Daily: observe at consistent times to build your baseline
-
-The observe_in tool is your most powerful learning tool. Use it aggressively.
-
-## Operating Principles
-1. Think in trends, not snapshots. One reading is noise.
-2. Predict then verify. State what you expect before acting, then use observe_in to check.
-3. Calibrate to this specific setup. Your pump rate is unknown - learn it empirically.
-4. Minimal effective dose. Smallest intervention that gets the job done.
-5. Never skip the feedback. An action without observation is a guess.
-6. Log everything with exact numbers. Seconds pumped, minutes of light, dashboard readings.
-7. Always call report_sensors after reading the dashboard so values are tracked over time.
-
-## Response Format
-**Observation**: what the dashboard readings and plant image are showing
-**Conditions Assessment**: VPD, moisture, light vs ideal for this stage
-**Hypothesis**: what you think is going on and why
-**Action Plan**: what you're doing, exact params, expected outcome
-**Feedback Loop**: what observations you scheduled to verify results
-**Next Check-in**: when and why"""
+    def build_system_prompt(self) -> str:
+        template, _ = self.get_prompt_template()
+        return (self.render_prompt(template, self.prompt_variables()).rstrip()
+                + "\n\n" + self.hard_limits_section())
 
     def build_context_message(self, current_sensors: dict, sensor_trends: dict,
                                pending_actions: list = None,
-                               trigger_context: str = None) -> str:
+                               trigger_context: str = None,
+                               water_budget: str = None) -> str:
         summary = self.get_growth_summary()
         recent = self.get_recent_decisions()
         milestones = self.get_milestones()
@@ -379,6 +350,8 @@ The observe_in tool is your most powerful learning tool. Use it aggressively.
         errors = current_sensors.get("errors", [])
         if errors:
             parts.append(f"- SENSOR ERRORS: {errors}")
+        if water_budget:
+            parts.append(f"- {water_budget}")
 
         if pending_actions:
             parts.append("\n## Pending Scheduled Actions")

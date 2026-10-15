@@ -34,10 +34,13 @@ PUSH_ITEMS = [
     "firebase-credentials.json",
     ".env.example",
     "test_hardware.py",
+    "supervisor.py",          # keeps the grower running, rolls back bad updates
+    "diagnose_cameras.py",
+    "prompts/",               # AI system prompt template (website edits go to *.local.md)
 ]
 
 # skip these when uploading
-SKIP_PATTERNS = ["__pycache__", ".pyc", "data/images/", "data/logs/", "venv/"]
+SKIP_PATTERNS = ["__pycache__", ".pyc", "data/images/", "data/logs/", "venv/", ".local.md"]
 
 
 def parse_args():
@@ -148,7 +151,7 @@ def push_files(ssh, local_base, remote_base):
 def install_system_deps(ssh):
     print("\n--- Installing system packages ---")
     run_cmd(ssh, "sudo apt-get update -qq")
-    run_cmd(ssh, "sudo apt-get install -y -qq python3-pip python3-venv libgpiod2", check=False)
+    run_cmd(ssh, "sudo apt-get install -y -qq python3-pip python3-venv libgpiod2 git", check=False)
 
 
 def setup_python_env(ssh, project_dir):
@@ -188,10 +191,14 @@ Wants=network-online.target
 [Service]
 User={user}
 WorkingDirectory={project_dir}
-ExecStart={project_dir}/venv/bin/python -m src.main
+ExecStart={project_dir}/venv/bin/python supervisor.py
 Restart=always
 RestartSec=10
+# SIGTERM goes to supervisor.py only; it stops the grower cleanly
+KillMode=mixed
+TimeoutStopSec=60
 Environment=PATH={project_dir}/venv/bin:/usr/bin
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
@@ -199,7 +206,30 @@ WantedBy=multi-user.target
     run_cmd(ssh, f"echo '{service}' | sudo tee /etc/systemd/system/{SERVICE_NAME}.service > /dev/null")
     run_cmd(ssh, f"sudo systemctl daemon-reload")
     run_cmd(ssh, f"sudo systemctl enable {SERVICE_NAME}")
-    print(f"  Service '{SERVICE_NAME}' installed and enabled")
+    print(f"  Service '{SERVICE_NAME}' installed and enabled (runs supervisor.py)")
+
+
+def setup_reboot_permission(ssh, user):
+    """Lets the website's "Reboot Pi" button run /sbin/reboot (and nothing else) without a password."""
+    print("\n--- Allowing reboot from the website ---")
+    rule = f"{user} ALL=(ALL) NOPASSWD: /sbin/reboot"
+    run_cmd(ssh, f"echo '{rule}' | sudo tee /etc/sudoers.d/vfarm-reboot > /dev/null "
+                 f"&& sudo chmod 440 /etc/sudoers.d/vfarm-reboot "
+                 f"&& sudo visudo -cf /etc/sudoers.d/vfarm-reboot", check=False)
+
+
+def warn_if_git_checkout(ssh, project_dir):
+    out, _, _ = run_cmd(ssh, f"test -d {project_dir}/.git && echo GIT || true", check=False)
+    if "GIT" in out:
+        print("  NOTE: the Pi copy is a git checkout (website 'Update from GitHub' was used).")
+        print("        Files pushed now show up as local edits; the next website update will")
+        print("        need 'discard local edits'. Prefer pushing to GitHub + Update from GitHub.")
+
+
+def skip_next_hardware_test(ssh, project_dir):
+    # Code pushes restart the service; don't water the plants for the hardware test.
+    run_cmd(ssh, f"mkdir -p {project_dir}/data && touch {project_dir}/data/skip_hardware_test_once",
+            check=False)
 
 
 def restart_service(ssh):
@@ -220,6 +250,7 @@ def main():
     project_dir = PROJECT_DIR.format(user=args.user)
 
     # always push code
+    warn_if_git_checkout(ssh, project_dir)
     push_files(ssh, local_base, project_dir)
 
     if not args.code_only:
@@ -232,6 +263,7 @@ def main():
 
         apply_pinmux_fix(ssh, project_dir)
         setup_systemd_service(ssh, project_dir, args.user)
+        setup_reboot_permission(ssh, args.user)
         restart_service(ssh)
 
         print("\n" + "=" * 50)
@@ -242,8 +274,11 @@ def main():
         print(f"  Dashboard: http://{args.host}:8080")
         print("=" * 50)
     else:
+        # keep the service definition current (switches old installs to supervisor.py)
+        setup_systemd_service(ssh, project_dir, args.user)
+        skip_next_hardware_test(ssh, project_dir)
         restart_service(ssh)
-        print("\nCode pushed and service restarted.")
+        print("\nCode pushed and service restarted (hardware test skipped).")
 
     ssh.close()
 

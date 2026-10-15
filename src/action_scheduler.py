@@ -142,6 +142,16 @@ class ActionScheduler:
         logger.info("cancelled action %s", action_id)
         return True
 
+    def clear(self) -> int:
+        """Drop every pending action (used by the AI memory reset)."""
+        with self._lock:
+            n = len([a for a in self._heap if a.id not in self._cancelled])
+            self._heap = []
+            self._cancelled = set()
+        self._save_queue()
+        logger.info("scheduler cleared, %d pending actions dropped", n)
+        return n
+
     def get_pending(self) -> list[dict]:
         now = time.time()
         with self._lock:

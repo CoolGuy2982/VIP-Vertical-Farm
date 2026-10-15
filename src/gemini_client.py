@@ -72,15 +72,17 @@ GROWER_TOOLS = [
             "IMPORTANT: The cloud API adds ~2-3s of latency on both ON and OFF commands — "
             "always add 5s of buffer to your target duration. "
             "A full 18-row tray watering requires ~40 seconds; anything under 20s will not "
-            "reach all rows. Start at 40s for a full water and adjust based on observed "
-            "soil moisture response. NEVER run if soil moisture is above 65%. Always log the reason."
+            "reach all rows. NEVER run if soil moisture is above 65%. Always log the reason. "
+            "The controller enforces a hard daily water budget (per-dose cap, daily cap "
+            "and minimum gap between doses, shown in the check-in context). Doses beyond "
+            "it are shortened or refused with blocked=true; wait for the time given."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "seconds": {
                     "type": "number",
-                    "description": "Pump run duration in seconds (1-60). Be precise.",
+                    "description": "Pump run duration in seconds (1-45). Be precise.",
                 },
                 "reason": {
                     "type": "string",
@@ -341,6 +343,9 @@ class GeminiClient:
         }
         if use_tools:
             kwargs["tools"] = _build_tools()
+        # We run the tool loop ourselves (ai_grower._run_tool_loop), so turn off the
+        # SDK's automatic function calling (AFC) and its warning.
+        kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(disable=True)
         if self.thinking:
             # -1 = dynamic budget (model decides how much to think)
             kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=-1)

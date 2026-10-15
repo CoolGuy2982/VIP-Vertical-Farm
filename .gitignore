@@ -219,3 +219,20 @@ firebase-credentials.json
 
 # Cached downloads (RPi OS images)
 .cache/
+
+# Pi runtime state (website remote control, supervisor, water budget)
+config.local.yaml
+prompts/*.local.md
+data/update_state.json
+data/last_good_commit
+data/remote_state.json
+data/pre_git_backup.tar.gz
+data/pump_doses.json
+data/light_state.json
+data/last_turn.json
+data/skip_hardware_test_once
+data/archive/
+data/config_backups/
+data/prompt_backups/
+data/failed_git_*/
+*.tmp

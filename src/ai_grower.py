@@ -28,6 +28,7 @@ MAX_TOOL_RESULT_CHARS = 800
 # Compression bounds: never feed more than this many recent decisions into the
 # summarizer. The growth_summary itself absorbs older history.
 MAX_DECISIONS_TO_COMPRESS = 40
+LAST_TURN_FILE = "data/last_turn.json"
 
 
 def _is_token_limit_error(exc: BaseException) -> bool:
@@ -59,7 +60,7 @@ class AIGrower:
         self.base_dir = base_dir
 
         self.sensors = Sensors(config)
-        self.actuators = Actuators(config)
+        self.actuators = Actuators(config, base_dir)
         self.camera = Camera(config, base_dir)
         self.context = ContextManager(base_dir, config)
         self.growth = GrowthTracker(base_dir)
@@ -69,6 +70,13 @@ class AIGrower:
 
         self._checkin_lock = False
         self._alert_log: list[dict] = []
+        # Website link (set by main.py); receives live AI activity events
+        self.remote = None
+        self.last_checkin: dict | None = None
+        self._state_path = Path(base_dir) / "data" / "remote_state.json"
+        self.paused = bool(self._load_state().get("paused", False))
+        if self.paused:
+            logger.warning("AI grower is PAUSED (resume it from the website)")
 
         self.scheduler.register_handler("checkin", self._handle_checkin_action)
         self.scheduler.register_handler("observe", self._handle_observe_action)
@@ -77,6 +85,55 @@ class AIGrower:
         self.scheduler.register_handler("turn_off_lights", self._handle_lights_off_action)
 
         logger.info("AI Grower initialized")
+
+    # ── website support ──────────────────────────────────────────────────────
+
+    def _load_state(self) -> dict:
+        try:
+            return json.loads(self._state_path.read_text())
+        except Exception:
+            return {}
+
+    def set_paused(self, paused: bool):
+        self.paused = paused
+        state = self._load_state()
+        state["paused"] = paused
+        self._state_path.parent.mkdir(parents=True, exist_ok=True)
+        self._state_path.write_text(json.dumps(state))
+        logger.info("AI grower %s from website", "PAUSED" if paused else "RESUMED")
+        self._activity("system", "AI paused" if paused else "AI resumed")
+        if not paused:
+            self.scheduler.schedule_checkin(1, "Resumed from website")
+
+    def _record_turn(self, trigger_type: str, level: int, system_prompt: str,
+                     user_message: str, images: list[str]):
+        """Save exactly what is about to be sent to Gemini (shown on the website)."""
+        turn = {
+            "at": datetime.now().isoformat(timespec="seconds"),
+            "trigger_type": trigger_type,
+            "context_level": level,
+            "system_prompt": system_prompt,
+            "user_message": user_message,
+            "images": [Path(p).name for p in images],
+        }
+        try:
+            path = Path(self.base_dir) / LAST_TURN_FILE
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(turn, indent=1), encoding="utf-8")
+        except Exception as e:
+            logger.warning("could not save last turn: %s", e)
+        if self.remote is not None:
+            try:
+                self.remote.publish_ai_context(turn)
+            except Exception:
+                pass
+
+    def _activity(self, kind: str, text: str, **data):
+        if self.remote is not None:
+            try:
+                self.remote.record_activity(kind, text, **data)
+            except Exception:
+                pass
 
     def start(self):
         logger.info("=" * 60)
@@ -106,27 +163,41 @@ class AIGrower:
         )
 
     def _handle_pump_action(self, action: ScheduledAction):
+        if self.paused:
+            logger.info("AI paused: skipping scheduled %s", action.action_type)
+            return
         seconds = action.params.get("seconds", 5)
         logger.info("scheduled pump running: %.1fs", seconds)
-        self.actuators.run_pump(seconds)
+        self.actuators.run_pump(seconds, source="scheduled", reason=action.reason)
 
     def _handle_lights_on_action(self, action: ScheduledAction):
+        if self.paused:
+            logger.info("AI paused: skipping scheduled %s", action.action_type)
+            return
         minutes = action.params.get("minutes", 60)
         logger.info("scheduled lights on for %.1f min", minutes)
         self.actuators.turn_on_lights(minutes)
 
     def _handle_lights_off_action(self, action: ScheduledAction):
+        if self.paused:
+            logger.info("AI paused: skipping scheduled %s", action.action_type)
+            return
         logger.info("scheduled lights off firing")
         self.actuators.turn_off_lights()
 
     def run_checkin(self, trigger_type: str = "checkin",
-                    trigger_context: str = None):
+                    trigger_context: str = None, force: bool = False):
+        if self.paused and not force:
+            logger.info("AI paused: skipping [%s]", trigger_type)
+            return
         if self._checkin_lock:
             logger.warning("Check-in already in progress, skipping [%s]", trigger_type)
             return
 
         self._checkin_lock = True
         checkin_start = time.time()
+        started_at = datetime.now().isoformat(timespec="seconds")
+        self._activity("checkin_start", f"{trigger_type} check-in started", trigger=trigger_type)
 
         try:
             day = self.context.get_days_since_planting()
@@ -141,8 +212,16 @@ class AIGrower:
             dashboard_image = self.camera.capture_dashboard(trigger_type)
             test_plant = self.camera.capture_plant("test")
 
+            self._activity(
+                "cameras",
+                "Cameras: plant " + ("OK" if test_plant else "FAILED")
+                + ", dashboard " + ("OK" if dashboard_image else "FAILED"))
+
             if not dashboard_image and not test_plant:
                 self._record_alert("Both cameras failed. Hardware failure.", "critical")
+                self.last_checkin = {"at": started_at, "ok": False, "trigger": trigger_type,
+                                     "error": "Both cameras failed, AI was not called"}
+                self._activity("error", "Check-in stopped: both cameras failed")
                 self.scheduler.schedule_checkin(60, "Retry after hardware failure")
                 return
 
@@ -179,6 +258,7 @@ class AIGrower:
 
             system_prompt = self.context.build_system_prompt()
 
+            self._activity("gemini", "Asking Gemini to assess the plant…")
             response, user_message = self._call_with_token_fallback(
                 trigger_type=trigger_type,
                 trigger_context=trigger_context,
@@ -198,9 +278,17 @@ class AIGrower:
             )
 
             logger.info("[%s] done in %.1fs", trigger_type.upper(), elapsed)
+            tools = [a["tool"] for a in response.get("actions", [])]
+            self.last_checkin = {"at": started_at, "ok": True, "trigger": trigger_type,
+                                 "elapsed_s": round(elapsed, 1), "tools": tools}
+            self._activity("decision", (response.get("text") or "Decision logged")[:300],
+                           elapsed_s=round(elapsed, 1), tools=", ".join(tools))
 
         except Exception as e:
             logger.error("[%s] FAILED: %s", trigger_type.upper(), e, exc_info=True)
+            self.last_checkin = {"at": started_at, "ok": False, "trigger": trigger_type,
+                                 "error": f"{type(e).__name__}: {e}"[:600]}
+            self._activity("error", f"Check-in failed: {type(e).__name__}: {e}")
             if _is_rate_limit_error(e):
                 self.scheduler.schedule_checkin(60, f"Retry after 429 rate limit: {e}")
             else:
@@ -250,12 +338,14 @@ class AIGrower:
             for key, val in sensor_data.items():
                 if key not in ("timestamp", "errors"):
                     parts.append(f"- {key}: {val}")
+            parts.append(f"- {self.actuators.water_budget.prompt_summary()}")
             context_msg = "\n".join(parts)
         else:
             context_msg = self.context.build_context_message(
                 sensor_data, sensor_trends,
                 pending_actions=pending,
                 trigger_context=trigger_context,
+                water_budget=self.actuators.water_budget.prompt_summary(),
             )
 
         all_images: list[str] = []
@@ -309,6 +399,8 @@ class AIGrower:
         last_error: Exception | None = None
         for level in range(4):
             user_message, all_images = self._build_checkin_payload(level=level, **kwargs)
+            self._record_turn(kwargs.get("trigger_type", "checkin"), level,
+                              system_prompt, user_message, all_images)
             try:
                 response = self._run_tool_loop(system_prompt, user_message, all_images)
                 if level > 0:
@@ -347,6 +439,8 @@ class AIGrower:
             parsed = self.gemini.extract_response(interaction)
             interaction_id = parsed["interaction_id"]
             all_thoughts.extend(parsed["thoughts"])
+            for thought in parsed["thoughts"][-1:]:
+                self._activity("thinking", thought)
 
             if parsed["text"] and not parsed["function_calls"]:
                 final_text = parsed["text"]
@@ -355,7 +449,12 @@ class AIGrower:
             if parsed["function_calls"]:
                 tool_results = []
                 for call in parsed["function_calls"]:
+                    self._activity("tool_call", call["name"],
+                                   args=json.dumps(call["arguments"])[:300])
                     result = self._execute_tool(call["name"], call["arguments"])
+                    self._activity("tool_result", call["name"],
+                                   result=json.dumps(result, default=str)[:300],
+                                   ok=not (isinstance(result, dict) and result.get("error")))
                     all_actions.append({
                         "tool": call["name"],
                         "args": call["arguments"],
@@ -411,7 +510,8 @@ class AIGrower:
                 return {"logged": True, "values": data}
 
             elif name == "run_pump":
-                return self.actuators.run_pump(arguments.get("seconds", 5))
+                return self.actuators.run_pump(arguments.get("seconds", 5), source="ai",
+                                               reason=arguments.get("reason", ""))
 
             elif name == "turn_on_lights":
                 return self.actuators.turn_on_lights(arguments.get("minutes", 60))
@@ -616,7 +716,7 @@ class AIGrower:
 
     def manual_checkin(self):
         import threading
-        t = threading.Thread(target=self.run_checkin, daemon=True)
+        t = threading.Thread(target=self.run_checkin, kwargs={"force": True}, daemon=True)
         t.start()
 
     def cleanup(self):

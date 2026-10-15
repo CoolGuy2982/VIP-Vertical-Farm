@@ -150,7 +150,7 @@ class ObserveRequest(BaseModel):
 @app.post("/api/control/pump")
 def manual_pump(req: PumpRequest):
     grower = _g()
-    result = grower.actuators.run_pump(req.seconds)
+    result = grower.actuators.run_pump(req.seconds, source="manual", reason="local API")
     grower.context.log_decision({
         "day": grower.context.get_days_since_planting(),
         "trigger_type": "manual",

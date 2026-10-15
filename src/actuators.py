@@ -3,8 +3,10 @@ import logging
 import os
 import platform
 import threading
+import json
 import time
 from datetime import datetime
+from pathlib import Path
 
 GPIO = None
 
@@ -22,6 +24,8 @@ except ImportError:
 
 from tplinkcloud import TPLinkDeviceManager # type: ignore
 
+from src.water_budget import WaterBudget
+
 logger = logging.getLogger(__name__)
 
 # Active-Low logic for the physical grow-light relay (BOARD Pin 13)
@@ -34,7 +38,7 @@ else:
 
 
 class Actuators:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, base_dir: str | None = None):
         self.config = config
         gpio_cfg      = config.get("gpio", {})
         kasa_cloud_cfg = config.get("kasa_cloud", {})
@@ -52,8 +56,12 @@ class Actuators:
         self._dash_on      = False
         self._pump_running = False
         self._light_timer: threading.Timer | None = None
+        self._light_off_at: str | None = None
         self._total_pump_seconds = 0.0
         self._action_log: list[dict] = []
+        self._pump_lock = threading.Lock()
+        self.water_budget = WaterBudget(config, base_dir)
+        self._light_state_path = (Path(base_dir) / "data" / "light_state.json") if base_dir else None
 
         self._init_gpio()
 
@@ -139,37 +147,58 @@ class Actuators:
 
     # ── Water pump (Kasa cloud) ───────────────────────────────────────────────
 
-    def run_pump(self, seconds: float) -> dict:
-        pump_cfg = self.config.get("water_pump", {})
-        seconds = max(
-            pump_cfg.get("min_seconds_per_dose", 1),
-            min(pump_cfg.get("max_seconds_per_dose", 60), seconds),
-        )
+    def run_pump(self, seconds: float, source: str = "ai", reason: str = "") -> dict:
+        """Run the pump, subject to the hard water budget (src/water_budget.py).
 
+        source: "ai" (tool call), "scheduled", "manual" (website/API) or
+        "startup_test". Blocked doses return {"blocked": True, "error": ...}.
+        """
         result = {
             "action":       "run_pump",
-            "seconds":      round(seconds, 1),
+            "requested_seconds": round(float(seconds), 1),
+            "source":       source,
             "timestamp":    datetime.now().isoformat(),
             "method":       "kasa_cloud",
             "device_alias": self._device_alias,
         }
 
-        logger.info("pump ('%s' via Kasa cloud) ON for %.1f s",
-                    self._device_alias, seconds)
-        self._pump_running = True
-        try:
-            async def _do_pump():
-                device = await self._get_pump_device()
-                await device.power_on()
-                await asyncio.sleep(seconds)   # non-blocking inside the event loop
-                await device.power_off()
+        if not self._pump_lock.acquire(blocking=False):
+            result.update(seconds=0, blocked=True, error="Pump is already running; dose refused")
+            logger.warning("pump dose refused (%s): pump already running", source)
+            self._log_action(result)
+            return result
 
-            self._run_async(_do_pump())
-        except Exception as e:
-            logger.error("Kasa cloud pump error: %s", e)
-            result["error"] = str(e)
+        try:
+            seconds, why = self.water_budget.reserve(seconds, source, reason)
+            result["seconds"] = seconds
+            result["water_budget"] = self.water_budget.prompt_summary()
+            if why:
+                result.update(blocked=True, error=why)
+                logger.warning("pump dose BLOCKED (%s, %.1fs requested): %s",
+                               source, result["requested_seconds"], why)
+                self._log_action(result)
+                return result
+
+            logger.info("pump ('%s' via Kasa cloud) ON for %.1f s [%s]",
+                        self._device_alias, seconds, source)
+            self._pump_running = True
+            try:
+                async def _do_pump():
+                    device = await self._get_pump_device()
+                    await device.power_on()
+                    try:
+                        await asyncio.sleep(seconds)   # non-blocking inside the event loop
+                    finally:
+                        await device.power_off()
+
+                self._run_async(_do_pump())
+            except Exception as e:
+                logger.error("Kasa cloud pump error: %s", e)
+                result["error"] = str(e)
+            finally:
+                self._pump_running = False
         finally:
-            self._pump_running = False
+            self._pump_lock.release()
 
         self._total_pump_seconds += seconds
         result["total_pump_seconds"] = round(self._total_pump_seconds, 1)
@@ -203,6 +232,8 @@ class Actuators:
 
         GPIO.output(self.light_pin, ON_STATE)
         self._light_on = True
+        self._light_off_at = datetime.fromtimestamp(time.time() + minutes * 60).isoformat(timespec="seconds")
+        self._save_light_state(time.time() + minutes * 60)
         self._light_timer = threading.Timer(minutes * 60, self._lights_auto_off)
         self._light_timer.daemon = True
         self._light_timer.start()
@@ -227,6 +258,8 @@ class Actuators:
 
         GPIO.output(self.light_pin, OFF_STATE)
         self._light_on = False
+        self._light_off_at = None
+        self._save_light_state(None)
         result = {"action": "turn_off_lights", "timestamp": datetime.now().isoformat()}
         self._log_action(result)
         return result
@@ -237,6 +270,30 @@ class Actuators:
             return
         GPIO.output(self.light_pin, OFF_STATE)
         self._light_on = False
+        self._light_off_at = None
+
+    # Lights survive a grower restart: remember when they should go off.
+    def _save_light_state(self, off_epoch: float | None):
+        if not self._light_state_path:
+            return
+        try:
+            self._light_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._light_state_path.write_text(json.dumps({"off_epoch": off_epoch}))
+        except Exception as e:
+            logger.debug("could not save light state: %s", e)
+
+    def restore_lights(self) -> bool:
+        """Turn the lights back on if they were on before a restart."""
+        try:
+            off = json.loads(self._light_state_path.read_text()).get("off_epoch")
+        except Exception:
+            return False
+        if not off or off - time.time() < 60:
+            return False
+        minutes = (off - time.time()) / 60
+        logger.info("restoring grow lights after restart (%.0f min left)", minutes)
+        self.turn_on_lights(minutes)
+        return True
 
     # ── Dashboard relay ───────────────────────────────────────────────────────
 
@@ -272,6 +329,7 @@ class Actuators:
             "total_pump_seconds": round(self._total_pump_seconds, 1),
             "pump_device":        self._device_alias,
             "pump_method":        "kasa_cloud",
+            "water_budget":       self.water_budget.status(),
         }
 
     def _log_action(self, action: dict):
@@ -288,9 +346,11 @@ class Actuators:
         if self._light_timer and self._light_timer.is_alive():
             self._light_timer.cancel()
 
-        GPIO.output(self.light_pin, OFF_STATE)
-        GPIO.output(self.dash_pin,  OFF_STATE)
-        GPIO.cleanup()
+        if GPIO is not None:
+            GPIO.output(self.light_pin, OFF_STATE)
+            GPIO.output(self.dash_pin,  OFF_STATE)
+            GPIO.cleanup()
+        self._light_on = False
 
         # Safety: best-effort pump-off on graceful shutdown
         if self._kasa_user and self._kasa_pass:
