@@ -308,3 +308,69 @@ def test_update_code_fast_forward_and_syntax_check(env, tmp_path_factory):
     d = send(env, "update_code", {"branch": "main"})
     assert d["status"] == "error" and "syntax" in d["error"]
     assert git(pi, "rev-parse", "--short", "HEAD") == good
+
+
+# ── link robustness ─────────────────────────────────────────────────────────
+
+def test_firestore_writes_have_timeouts(env):
+    send(env, "ping")
+    # the one write without a timeout is the test creating the command doc
+    assert env.db.timeouts.count(None) == 1
+    assert env.db.timeouts.count(rc.FIRESTORE_TIMEOUT) >= 3
+
+
+def test_failed_heartbeat_is_logged_as_warning(env, monkeypatch, caplog):
+    def boom(*a, **k):
+        raise RuntimeError("DeadlineExceeded")
+    monkeypatch.setattr(env.remote, "build_status", boom)
+    env.remote._last_link_warning = 0
+    env.remote._running = True
+    monkeypatch.setattr(rc, "HEARTBEAT_SECONDS", 0)
+    import threading
+    t = threading.Thread(target=env.remote._heartbeat_loop, daemon=True)
+    t.start()
+    time.sleep(0.3)
+    env.remote._running = False
+    t.join(2)
+    assert any("can't write status" in r.message for r in caplog.records if r.levelname == "WARNING")
+
+
+def test_watchdog_restarts_once_when_heartbeat_stuck(env, monkeypatch):
+    monkeypatch.setattr(rc.time, "sleep", lambda s: None)
+    env.remote._heartbeat_tick = time.time() - rc.STUCK_SECONDS - 5
+    env.remote._watchdog_loop()
+    assert env.restarts == [1]
+    # a second stuck heartbeat within the hour does not restart again
+    env.remote._running = True
+    calls = {"n": 0}
+
+    def stop_after_one(_):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            env.remote._running = False
+    monkeypatch.setattr(rc.time, "sleep", stop_after_one)
+    env.remote._watchdog_loop()
+    assert env.restarts == [1]
+
+
+def test_watchdog_waits_for_checkin(env, monkeypatch):
+    env.grower._checkin_lock = True
+    env.remote._heartbeat_tick = time.time() - rc.STUCK_SECONDS - 5
+    n = {"i": 0}
+
+    def tick(_):
+        n["i"] += 1
+        if n["i"] > 2:
+            env.remote._running = False
+    monkeypatch.setattr(rc.time, "sleep", tick)
+    env.remote._watchdog_loop()
+    assert env.restarts == []
+
+
+def test_status_with_odd_values_still_written(env):
+    class SdkValue:            # stands in for e.g. a protobuf map from the Gemini SDK
+        def __str__(self):
+            return "odd"
+    env.grower.sensors = SimpleNamespace(read_all=lambda: {"temperature_c": SdkValue()})
+    env.remote._write_status(force=True)
+    assert env.db.docs[f"grows/{DEVICE}/live/status"]["grower"]["sensors"]["temperature_c"] == "odd"

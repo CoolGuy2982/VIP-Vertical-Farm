@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 RESTART_EXIT_CODE = 42          # supervisor.py restarts the grower on this code
 HEARTBEAT_SECONDS = 15
+FIRESTORE_TIMEOUT = 20          # seconds; a stuck Firestore call must not freeze the link
+STUCK_SECONDS = 180             # heartbeat silent this long -> restart the grower (watchdog)
+WATCHDOG_MIN_GAP_SECONDS = 3600 # at most one watchdog restart per hour
+VERSION_CACHE_SECONDS = 300     # git is run at most this often for the status
 COMMAND_MAX_AGE_SECONDS = 600   # ignore commands queued >10 min ago (Pi was offline)
 LIVE_DEFAULT_SECONDS = 300
 LIVE_MAX_SECONDS = 1800
@@ -171,6 +175,16 @@ def validate_config(cfg) -> list[str]:
     return errors
 
 
+class _TimedRef:
+    """Firestore document ref whose writes give up after FIRESTORE_TIMEOUT."""
+
+    def __init__(self, ref):
+        self._ref = ref
+
+    def set(self, data, merge=False):
+        return self._ref.set(data, merge=merge, timeout=FIRESTORE_TIMEOUT)
+
+
 def _stamp() -> str:
     return datetime.now().strftime("%Y-%m-%d_%H%M%S")
 
@@ -206,6 +220,10 @@ class RemoteControl:
         self._watch = None
         self._throttled_cache = (0.0, None)
         self.activity: deque = deque(maxlen=40)
+        self._heartbeat_tick = time.time()
+        self._link_down_since: float | None = None
+        self._last_link_warning = 0.0
+        self._version_cache: tuple[float, dict | None] = (0.0, None)
 
         self.live_until = 0.0
         self.live_cams: list[str] = ["plant", "dashboard"]
@@ -220,7 +238,14 @@ class RemoteControl:
     # ------------------------------------------------------------ firestore refs
 
     def _doc(self, path: str):
-        return self.fb.db.document(f"grows/{self.device_id}/{path}")
+        return _TimedRef(self.fb.db.document(f"grows/{self.device_id}/{path}"))
+
+    def _pending_commands(self):
+        try:
+            from google.cloud.firestore_v1.base_query import FieldFilter
+            return self._commands().where(filter=FieldFilter("status", "==", "pending"))
+        except ImportError:
+            return self._commands().where("status", "==", "pending")
 
     def _commands(self):
         return self.fb.db.collection(f"grows/{self.device_id}/commands")
@@ -238,6 +263,7 @@ class RemoteControl:
             "state": "running", "at": utc_now(),
             "supervised": os.environ.get("VFARM_SUPERVISED") == "1"}})
         for target, name in ((self._heartbeat_loop, "remote-heartbeat"),
+                             (self._watchdog_loop, "remote-watchdog"),
                              (self._poll_loop, "remote-poll"),
                              (self._live_loop, "remote-live"),
                              (self._verify_startup, "remote-verify")):
@@ -285,16 +311,57 @@ class RemoteControl:
 
     def _heartbeat_loop(self):
         while self._running:
+            self._heartbeat_tick = time.time()
             try:
                 self._write_status()
                 if self.logs.seq != self._last_logs_seq:
                     self._write_logs()
+                if self._link_down_since:
+                    logger.info("Website link restored after %.0f s",
+                                time.time() - self._link_down_since)
+                    self._link_down_since = None
             except Exception as e:
-                logger.debug("heartbeat failed: %s", e)
+                # Visible in the log (rate-limited), so a dead link is never silent
+                now = time.time()
+                self._link_down_since = self._link_down_since or now
+                if now - self._last_link_warning > 300:
+                    self._last_link_warning = now
+                    logger.warning("Website link: can't write status to Firestore: %s: %s",
+                                   type(e).__name__, str(e)[:300])
             for _ in range(HEARTBEAT_SECONDS):
                 if not self._running:
                     return
                 time.sleep(1)
+
+    def _watchdog_loop(self):
+        """Restart the grower if the heartbeat thread gets stuck (e.g. a hung network call).
+
+        Plain errors (internet down) don't count: those return and are retried.
+        """
+        while self._running:
+            time.sleep(15)
+            stuck = time.time() - self._heartbeat_tick
+            if stuck < STUCK_SECONDS:
+                continue
+            g = self.grower
+            if getattr(g, "_checkin_lock", False) or g.actuators.get_status().get("pump_running"):
+                continue    # don't interrupt watering or a check-in; try again shortly
+            marker = self.base / "data" / "watchdog_last_restart"
+            try:
+                last = float(marker.read_text())
+            except Exception:
+                last = 0.0
+            if time.time() - last < WATCHDOG_MIN_GAP_SECONDS:
+                continue
+            logger.error("Website link stuck for %.0f s (heartbeat not running); restarting the grower",
+                         stuck)
+            try:
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(str(time.time()))
+            except Exception:
+                pass
+            self.request_restart()
+            return
 
     def _write_logs(self):
         self._last_logs_seq = self.logs.seq
@@ -307,6 +374,9 @@ class RemoteControl:
             status = self.build_status()
             if extra:
                 status.update(extra)
+            # Plain JSON only: one odd value (e.g. an SDK type in the AI's sensor
+            # arguments) would make Firestore reject every heartbeat
+            status = json.loads(json.dumps(status, default=str))
             self._doc("live/status").set(status, merge=True)
             self._last_status_write = time.time()
 
@@ -501,7 +571,16 @@ class RemoteControl:
         except Exception:
             return False
 
-    def _version(self) -> dict:
+    def _version(self, fresh: bool = False) -> dict:
+        # git spawns several processes; the status asks every 15 s, so cache it
+        ts, cached = self._version_cache
+        if cached is not None and not fresh and time.time() - ts < VERSION_CACHE_SECONDS:
+            return cached
+        value = self._read_version()
+        self._version_cache = (time.time(), value)
+        return value
+
+    def _read_version(self) -> dict:
         if not self._is_git_repo():
             return {"git": False, "note": "Code was copied to the Pi without git; first "
                     "'Update from GitHub' will set git up."}
@@ -546,7 +625,7 @@ class RemoteControl:
         time.sleep(VERIFY_SECONDS)
         if not self._running:
             return
-        commit = self._version().get("commit")
+        commit = self._version(fresh=True).get("commit")
         if commit:
             try:
                 self.last_good_path.write_text(commit)
@@ -572,11 +651,7 @@ class RemoteControl:
 
     def _subscribe(self):
         try:
-            try:
-                from google.cloud.firestore_v1.base_query import FieldFilter
-                query = self._commands().where(filter=FieldFilter("status", "==", "pending"))
-            except Exception:
-                query = self._commands().where("status", "==", "pending")
+            query = self._pending_commands()
 
             def on_snapshot(docs, changes, read_time):
                 for d in docs:
@@ -596,10 +671,10 @@ class RemoteControl:
                     return
                 time.sleep(1)
             try:
-                for d in self._commands().where("status", "==", "pending").limit(20).get():
+                for d in self._pending_commands().limit(20).get(timeout=FIRESTORE_TIMEOUT):
                     self._accept(d)
             except Exception as e:
-                logger.debug("command poll failed: %s", e)
+                logger.warning("command poll failed: %s: %s", type(e).__name__, str(e)[:200])
 
     def _accept(self, doc):
         if doc.id in self._seen:
@@ -624,7 +699,7 @@ class RemoteControl:
         if progress is not None:
             update["progress"] = str(progress)[:500]
         try:
-            self._commands().document(cmd_id).set(update, merge=True)
+            _TimedRef(self._commands().document(cmd_id)).set(update, merge=True)
         except Exception as e:
             logger.warning("could not update command %s: %s", cmd_id, e)
 
@@ -917,9 +992,10 @@ class RemoteControl:
             if r.returncode:
                 logger.warning("pip install had problems: %s", r.stderr[-800:])
 
-        # Catch syntax errors before restarting
+        # Catch syntax errors before restarting (-f: compileall skips files whose
+        # mtime matches the cached .pyc to the second, which can hide a broken edit)
         progress("Checking the new code compiles…")
-        r = subprocess.run([sys.executable, "-m", "compileall", "-q", "src"], cwd=self.base,
+        r = subprocess.run([sys.executable, "-m", "compileall", "-q", "-f", "src"], cwd=self.base,
                            capture_output=True, text=True, timeout=180)
         if r.returncode:
             if from_commit:

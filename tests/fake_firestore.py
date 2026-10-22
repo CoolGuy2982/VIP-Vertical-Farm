@@ -27,7 +27,8 @@ class DocRef:
         self.db, self.path = db, path
         self.id = path.rsplit("/", 1)[-1]
 
-    def set(self, data, merge=False):
+    def set(self, data, merge=False, timeout=None):
+        self.db.timeouts.append(timeout)
         with self.db.lock:
             if merge and self.path in self.db.docs:
                 _merge(self.db.docs[self.path], data)
@@ -54,7 +55,7 @@ class Query:
     def limit(self, n):
         return Query(self.coll, self.filters, n)
 
-    def get(self):
+    def get(self, timeout=None):
         out = []
         with self.coll.db.lock:
             for path, data in self.coll.db.docs.items():
@@ -96,6 +97,7 @@ class FakeFirestore:
     def __init__(self):
         self.docs: dict[str, dict] = {}
         self.writes: list[str] = []
+        self.timeouts: list = []
         self.watches: list[Watch] = []
         self.lock = threading.RLock()
 
