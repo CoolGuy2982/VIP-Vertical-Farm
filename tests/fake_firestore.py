@@ -37,9 +37,12 @@ class DocRef:
             self.db.writes.append(self.path)
         self.db._notify(self.path.rsplit("/", 1)[0])
 
-    def get(self):
+    def get(self, timeout=None):
         with self.db.lock:
-            return Snapshot(self.id, copy.deepcopy(self.db.docs.get(self.path)))
+            data = self.db.docs.get(self.path)
+            snap = Snapshot(self.id, copy.deepcopy(data))
+            snap.exists = data is not None
+            return snap
 
 
 class Query:

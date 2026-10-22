@@ -916,11 +916,43 @@ class RemoteControl:
         return {"message": "Camera settings saved", **changes}
 
     def cmd_swap_cameras(self, args, cmd_id):
+        """Swap the two cameras. A swap means "the photos so far were filed under
+        the wrong camera", so the Pi's saved photos are relabelled too (the AI
+        uses them as history) and the swap time is recorded for the website,
+        which re-sorts older captures between its Plant and Dashboard tabs."""
         cam = self.grower.camera
         plant, dash = cam.dashboard_device, cam.plant_device
         cam.set_devices(plant=plant, dashboard=dash)
         self._save_local({"camera": {"plant_cam": str(plant), "dashboard_cam": str(dash)}})
-        return {"message": f"Swapped: plant={plant}, dashboard={dash}"}
+        swapped_at = datetime.now().isoformat()
+        relabelled = self._relabel_photos(Path(getattr(cam, "image_dir", self.base / "data" / "images")))
+        try:
+            ref = self.fb.db.document(f"grows/{self.device_id}")
+            snap = ref.get(timeout=FIRESTORE_TIMEOUT)
+            swaps = list((snap.to_dict() or {}).get("camera_swaps") or []) if snap.exists else []
+            _TimedRef(ref).set({"camera_swaps": swaps + [swapped_at]}, merge=True)
+        except Exception as e:
+            logger.warning("camera swap not recorded for the website: %s", e)
+        return {"message": f"Swapped: plant={plant}, dashboard={dash}. "
+                           f"{relabelled} saved photos relabelled; the website re-sorts older captures.",
+                "swapped_at": swapped_at, "relabelled": relabelled}
+
+    @staticmethod
+    def _relabel_photos(image_dir: Path) -> int:
+        """plant_*.jpg <-> dashboard_*.jpg (two steps, so names never collide)."""
+        if not image_dir.is_dir():
+            return 0
+        staged = []
+        for p in image_dir.glob("*.jpg"):
+            for old, new in (("plant_", "dashboard_"), ("dashboard_", "plant_")):
+                if p.name.startswith(old):
+                    tmp = p.with_name(".swap_" + new + p.name[len(old):])
+                    p.rename(tmp)
+                    staged.append(tmp)
+                    break
+        for tmp in staged:
+            tmp.rename(tmp.with_name(tmp.name[len(".swap_"):]))
+        return len(staged)
 
     # ------------------------------------------------------------ commands: settings
 

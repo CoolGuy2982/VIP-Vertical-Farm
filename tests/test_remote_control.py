@@ -462,3 +462,20 @@ def test_startup_in_standby_skips_hardware_test_and_light_restore():
     standby = src.index("if grower.paused:")
     assert standby < src.index("grower.actuators.restore_lights()")
     assert standby < src.index("hardware_test(grower, config, logger)")
+
+
+def test_swap_relabels_photos_and_records_swap_for_website(env):
+    imgs = env.base / "data" / "images"
+    imgs.mkdir(parents=True, exist_ok=True)
+    (imgs / "plant_checkin_20261022_090000.jpg").write_bytes(b"really the dashboard")
+    (imgs / "dashboard_checkin_20261022_090000.jpg").write_bytes(b"really the plant")
+    (imgs / "blank").mkdir(exist_ok=True)
+    env.grower.camera.image_dir = imgs
+    r = send(env, "swap_cameras")
+    assert r["status"] == "done" and r["result"]["relabelled"] == 2
+    assert (imgs / "plant_checkin_20261022_090000.jpg").read_bytes() == b"really the plant"
+    assert (imgs / "dashboard_checkin_20261022_090000.jpg").read_bytes() == b"really the dashboard"
+    assert not list(imgs.glob(".swap_*"))
+    send(env, "swap_cameras")
+    swaps = env.db.docs[f"grows/{DEVICE}"]["camera_swaps"]
+    assert len(swaps) == 2 and swaps[0] <= swaps[1]
