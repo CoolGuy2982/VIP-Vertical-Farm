@@ -142,7 +142,10 @@ def main():
 
     check_kasa(config, logger)
 
-    if is_restart(config, base_dir):
+    if grower.paused:
+        # Standby (e.g. empty tent): no hardware test, and the light stays off
+        logger.info("Standby: skipping the hardware test; lights stay off until resumed")
+    elif is_restart(config, base_dir):
         logger.info("Restart: skipping the pump/light/camera hardware test")
         grower.actuators.restore_lights()
     else:

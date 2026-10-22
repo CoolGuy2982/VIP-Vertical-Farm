@@ -442,3 +442,23 @@ def test_new_grow_rejects_bad_date_before_changing_anything(env):
     r = send(env, "reset_ai_memory", {"planted_date": "22/10/2026"})
     assert r["status"] == "error"
     assert env.grower.context.get_decision_count() == 1
+
+
+def test_standby_turns_light_off_and_keeps_it_off(env, monkeypatch):
+    calls = []
+    monkeypatch.setattr(env.grower.actuators, "turn_off_lights",
+                        lambda: calls.append("off") or {"action": "turn_off_lights"})
+    r = send(env, "pause_ai")
+    assert r["status"] == "done" and "grow light off" in r["result"]["message"]
+    assert env.grower.paused and calls == ["off"]
+    problems = {p["id"]: p for p in env.remote._problems()}
+    assert problems["paused"]["title"].startswith("Standby")
+    send(env, "pause_ai", {"keep_lights": True})
+    assert calls == ["off"]
+
+
+def test_startup_in_standby_skips_hardware_test_and_light_restore():
+    src = (REPO / "src" / "main.py").read_text(encoding="utf-8")
+    standby = src.index("if grower.paused:")
+    assert standby < src.index("grower.actuators.restore_lights()")
+    assert standby < src.index("hardware_test(grower, config, logger)")

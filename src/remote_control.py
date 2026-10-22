@@ -490,8 +490,9 @@ class RemoteControl:
                         "title": "Pi is overheating", "detail": f"CPU {host['cpu_temp_c']} °C"})
         if getattr(self.grower, "paused", False):
             out.append({"id": "paused", "severity": "warning",
-                        "title": "AI grower is paused",
-                        "detail": "No automatic check-ins, watering or lighting until resumed."})
+                        "title": "Standby: the AI grower is off",
+                        "detail": "No check-ins, watering or lights until you press Resume growing "
+                                  "(Control Center → Grow). Manual controls still work."})
         last = getattr(self.grower, "last_checkin", None) or {}
         if last.get("ok") is False:
             out.append({"id": "checkin", "severity": "error",
@@ -844,12 +845,18 @@ class RemoteControl:
         return {"message": f"Next check-in in {minutes} min", "action_id": a.id}
 
     def cmd_pause_ai(self, args, cmd_id):
+        """Standby: no check-ins, watering or lighting, and the grow light goes off
+        (it also stays off after restarts). Manual website controls still work."""
         self.grower.set_paused(True)
-        return {"message": "AI paused: no automatic check-ins, watering or lighting"}
+        msg = "Standby: AI stopped, no automatic watering or lighting"
+        if not args.get("keep_lights"):
+            r = self.grower.actuators.turn_off_lights()
+            msg += ", grow light off" if not r.get("simulated") else " (no GPIO: light not switched)"
+        return {"message": msg + ". Resume to start growing again."}
 
     def cmd_resume_ai(self, args, cmd_id):
         self.grower.set_paused(False)
-        return {"message": "AI resumed; check-in in about 1 minute"}
+        return {"message": "Growing resumed; the AI checks in within a few minutes"}
 
     def cmd_cancel_action(self, args, cmd_id):
         ok = self.grower.scheduler.cancel(str(args.get("id", "")))
