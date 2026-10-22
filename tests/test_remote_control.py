@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 import shutil
 import subprocess
 import sys
@@ -374,3 +375,25 @@ def test_status_with_odd_values_still_written(env):
     env.grower.sensors = SimpleNamespace(read_all=lambda: {"temperature_c": SdkValue()})
     env.remote._write_status(force=True)
     assert env.db.docs[f"grows/{DEVICE}/live/status"]["grower"]["sensors"]["temperature_c"] == "odd"
+
+
+def test_gemini_503_is_explained_and_cleared_by_next_good_checkin(env):
+    import logging
+    log = logging.getLogger("src.remote_control")
+    log.addHandler(env.remote.logs)
+    try:
+        msg = ("website command checkin failed: ServerError: 503 UNAVAILABLE. "
+               "{'error': {'code': 503, 'message': 'This model is currently experiencing high demand.'}}")
+        log.error(msg)
+        env.grower.last_checkin = {"at": "2000-01-01T00:00:00", "ok": False, "error": msg}
+        problems = env.remote._problems()
+        assert all("Gemini is overloaded" in p["detail"] for p in problems
+                   if p["id"] in ("checkin", "log_src.remote_control"))
+        assert {"checkin", "log_src.remote_control"} <= {p["id"] for p in problems}
+        # a later check-in worked: the old AI errors disappear
+        env.grower.last_checkin = {"at": datetime.now().isoformat(timespec="seconds"), "ok": True}
+        time.sleep(1.1)
+        env.grower.last_checkin["at"] = datetime.now().isoformat(timespec="seconds")
+        assert not {"checkin", "log_src.remote_control"} & {p["id"] for p in env.remote._problems()}
+    finally:
+        log.removeHandler(env.remote.logs)

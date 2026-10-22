@@ -60,6 +60,22 @@ LOGGER_LABELS = {
 }
 
 
+def friendly_error(msg: str) -> str:
+    """Short, plain explanation for errors the team sees often."""
+    m = str(msg)
+    low = m.lower()
+    if "503" in m and ("unavailable" in low or "high demand" in low or "overloaded" in low):
+        return ("Gemini is overloaded right now (Google 503, not a bug here). "
+                "The AI retries automatically; nothing to do.")
+    if "429" in m or "resource_exhausted" in low or "too many requests" in low:
+        return "Gemini rate limit reached (429). The AI waits and retries automatically."
+    return m
+
+
+# AI-side errors that a later successful check-in makes obsolete
+AI_LOG_SOURCES = {"src.ai_grower", "src.gemini_client"}
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -480,13 +496,24 @@ class RemoteControl:
         if last.get("ok") is False:
             out.append({"id": "checkin", "severity": "error",
                         "title": "Last AI check-in failed",
-                        "detail": last.get("error", ""), "since": last.get("at")})
+                        "detail": friendly_error(last.get("error", "")), "since": last.get("at")})
+        ok_since = 0.0
+        if last.get("ok"):
+            try:
+                ok_since = datetime.fromisoformat(last["at"]).timestamp()
+            except Exception:
+                pass
         # Recent ERROR log lines grouped by component (last 30 min)
         cutoff = time.time() - 1800
         seen = {p["id"] for p in out}
         grouped: dict[str, dict] = {}
         for e in self.logs.recent_problems(60):
             if e["level"] not in ("ERROR", "CRITICAL") or e["epoch"] < cutoff:
+                continue
+            # A check-in that worked since then means the AI problem is over
+            ai_error = e["source"] in AI_LOG_SOURCES or (
+                e["source"] == "src.remote_control" and "command checkin" in e["msg"])
+            if ai_error and e["epoch"] < ok_since:
                 continue
             g = grouped.setdefault(e["source"], {"count": 0})
             g["count"] += 1
@@ -499,7 +526,7 @@ class RemoteControl:
             out.append({
                 "id": pid, "severity": "error",
                 "title": f"{label} error" + (f" ({g['count']}× in 30 min)" if g["count"] > 1 else ""),
-                "detail": g["last"]["msg"], "since": g["last"]["t"],
+                "detail": friendly_error(g["last"]["msg"]), "since": g["last"]["t"],
             })
         return out
 
