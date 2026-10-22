@@ -792,9 +792,38 @@ class RemoteControl:
         return {"message": f"Watered for {r.get('seconds')} s", **r}
 
     def cmd_reset_ai_memory(self, args, cmd_id):
+        """Start a new grow (default) or just clear the AI's memory.
+
+        New grow: archive memory + photos, set planted_date (default today), and
+        record grows/<device>.current_grow so the website shows only this grow's
+        photos, decisions and sensor trends. Nothing is deleted anywhere.
+        """
         from src.memory_reset import reset_ai_memory
+        new_grow = args.get("new_grow", True) is not False
+        planted = str(args.get("planted_date") or datetime.now().strftime("%Y-%m-%d"))
+        datetime.strptime(planted, "%Y-%m-%d")      # validate before changing anything
         r = reset_ai_memory(self.base, args.get("reason", "Reset from the website"),
-                            grower=self.grower)
+                            grower=self.grower, archive_images=new_grow)
+        if new_grow:
+            self.config.setdefault("plant", {})["planted_date"] = planted
+            self._save_local({"plant": {"planted_date": planted}})
+            grow = {"id": Path(r["archive"]).name, "started_at": datetime.now().isoformat(),
+                    "planted_date": planted, "previous_archive": r["archive"],
+                    "reason": args.get("reason", "")}
+            try:
+                fresh_summary = {
+                    "current_grow": grow,
+                    "summary": "No growth history yet. This is a new plant.",
+                    "key_learnings": [], "patterns": {}, "updated_at": datetime.now().isoformat()}
+                _TimedRef(self.fb.db.document(f"grows/{self.device_id}")).set(fresh_summary, merge=True)
+                _TimedRef(self.fb.db.document(
+                    f"grows/{self.device_id}/grow_history/{grow['id']}")).set(grow)
+            except Exception as e:
+                raise RuntimeError(f"Memory archived and date set, but the website could not be "
+                                   f"told about the new grow: {e}. Run the reset again.")
+            r["message"] = (f"New grow started (day 0 = {planted}). {r['message']}. "
+                            "The website now shows only this grow.")
+            r["grow"] = grow
         self.record_activity("system", r["message"])
         return r
 

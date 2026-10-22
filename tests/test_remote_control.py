@@ -397,3 +397,48 @@ def test_gemini_503_is_explained_and_cleared_by_next_good_checkin(env):
         assert not {"checkin", "log_src.remote_control"} & {p["id"] for p in env.remote._problems()}
     finally:
         log.removeHandler(env.remote.logs)
+
+
+def test_new_grow_resets_date_photos_and_tells_website(env):
+    imgs = env.base / "data" / "images"
+    imgs.mkdir(parents=True, exist_ok=True)
+    (imgs / "plant_checkin_20261015_100000.jpg").write_bytes(b"x")
+    (imgs / "blank").mkdir(exist_ok=True)
+    (imgs / "blank" / "blank.jpg").write_bytes(b"b")
+    env.grower.camera.image_dir = imgs
+    env.grower.context.log_decision({"day": 14, "observation": "old grow"})
+
+    r = send(env, "reset_ai_memory", {"planted_date": "2026-10-22", "reason": "new tray"})
+    assert r["status"] == "done", r
+    res = r["result"]
+    assert res["images"] == 1 and "New grow started" in res["message"]
+    # photos archived (blank placeholder kept), memory archived
+    assert not list(imgs.glob("*.jpg")) and (imgs / "blank" / "blank.jpg").exists()
+    assert (env.base / res["archive"] / "images" / "plant_checkin_20261015_100000.jpg").exists()
+    # day 0 from today, saved for restarts
+    assert env.grower.context.get_days_since_planting() == (datetime.now().date() - datetime(2026, 10, 22).date()).days
+    assert load_config(env.base)["plant"]["planted_date"] == "2026-10-22"
+    # website marker
+    summary = env.db.docs[f"grows/{DEVICE}"]
+    assert summary["current_grow"]["planted_date"] == "2026-10-22"
+    assert summary["current_grow"]["started_at"] and summary["key_learnings"] == []
+    assert f"grows/{DEVICE}/grow_history/{res['grow']['id']}" in env.db.docs
+
+
+def test_memory_only_reset_keeps_photos_and_date(env):
+    imgs = env.base / "data" / "images"
+    imgs.mkdir(parents=True, exist_ok=True)
+    (imgs / "plant_a.jpg").write_bytes(b"x")
+    env.grower.camera.image_dir = imgs
+    before = env.config["plant"]["planted_date"]
+    r = send(env, "reset_ai_memory", {"new_grow": False})["result"]
+    assert r["images"] == 0 and (imgs / "plant_a.jpg").exists()
+    assert env.config["plant"]["planted_date"] == before
+    assert f"grows/{DEVICE}" not in env.db.docs
+
+
+def test_new_grow_rejects_bad_date_before_changing_anything(env):
+    env.grower.context.log_decision({"day": 14})
+    r = send(env, "reset_ai_memory", {"planted_date": "22/10/2026"})
+    assert r["status"] == "error"
+    assert env.grower.context.get_decision_count() == 1

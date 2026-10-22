@@ -37,9 +37,11 @@ def _count_lines(path: Path) -> int:
         return 0
 
 
-def reset_ai_memory(base_dir: str | Path, reason: str = "", grower=None) -> dict:
-    """Archive the AI's memory files. With a running grower, also clear its
-    in-memory scheduler queue and Gemini conversation."""
+def reset_ai_memory(base_dir: str | Path, reason: str = "", grower=None,
+                    archive_images: bool = True) -> dict:
+    """Archive the AI's memory files (and by default the photos, which the AI
+    also uses as history). With a running grower, also clear its in-memory
+    scheduler queue and Gemini conversation."""
     base = Path(base_dir)
     if grower is not None and getattr(grower, "_checkin_lock", False):
         raise RuntimeError("A check-in is running; try again in a minute")
@@ -56,10 +58,23 @@ def reset_ai_memory(base_dir: str | Path, reason: str = "", grower=None) -> dict
         moved[rel] = {"bytes": src.stat().st_size, "lines": _count_lines(src)}
         shutil.move(str(src), str(archive / src.name))
 
+    # Photos: the AI is shown the last few plant photos as "history", so the
+    # old tray's photos must go too. (data/images/blank/ stays.)
+    images_moved = 0
+    if archive_images:
+        image_dir = Path(getattr(getattr(grower, "camera", None), "image_dir", "") or base / "data" / "images")
+        if image_dir.is_dir():
+            dest = archive / "images"
+            for img in image_dir.glob("*.jpg"):
+                dest.mkdir(exist_ok=True)
+                shutil.move(str(img), str(dest / img.name))
+                images_moved += 1
+
     manifest = {
         "archived_at": datetime.now().isoformat(timespec="seconds"),
         "reason": reason,
         "files": moved,
+        "images": images_moved,
     }
     if grower is not None:
         plant = grower.config.get("plant", {})
@@ -82,12 +97,14 @@ def reset_ai_memory(base_dir: str | Path, reason: str = "", grower=None) -> dict
                 "First check-in after AI memory reset (new grow)")
 
     rel_archive = archive.relative_to(base).as_posix()
-    logger.warning("AI memory reset: %d files archived to %s, %d scheduled actions dropped (%s)",
-                   len(moved), rel_archive, dropped, reason or "no reason given")
+    logger.warning("AI memory reset: %d files and %d photos archived to %s, "
+                   "%d scheduled actions dropped (%s)",
+                   len(moved), images_moved, rel_archive, dropped, reason or "no reason given")
     return {
-        "message": f"AI memory archived to {rel_archive}",
+        "message": f"AI memory and {images_moved} photos archived to {rel_archive}",
         "archive": rel_archive,
         "files": moved,
+        "images": images_moved,
         "dropped_actions": dropped,
     }
 
