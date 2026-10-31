@@ -231,6 +231,7 @@ class RemoteControl:
         self._seen: set[str] = set()
         self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="remote-cmd")
         self._status_lock = threading.Lock()
+        self._update_lock = threading.Lock()
         self._last_status_write = 0.0
         self._last_logs_seq = -1
         self._watch = None
@@ -1018,6 +1019,16 @@ class RemoteControl:
         return None
 
     def cmd_update_code(self, args, cmd_id):
+        """One update at a time: two parallel git fetches fight over the same ref
+        ("cannot lock ref 'refs/remotes/origin/main'")."""
+        if not self._update_lock.acquire(blocking=False):
+            raise RuntimeError("Another update is already running; wait for it to finish.")
+        try:
+            return self._update_code(args, cmd_id)
+        finally:
+            self._update_lock.release()
+
+    def _update_code(self, args, cmd_id):
         """Pull the latest code from GitHub, sanity-check it, restart, verify."""
         def progress(msg):
             logger.info("update: %s", msg)

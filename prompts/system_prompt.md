@@ -39,7 +39,7 @@ If the camera feed is too dark to see anything, call turn_on_lights(60) immediat
 
 You have NO hardware sensors connected to the Pi. Your only source of environmental data is reading the dashboard display through the camera. Every check-in:
 1. Look at the dashboard image and read all the numbers shown
-2. Call report_sensors with the values you extracted
+2. Call report_sensors with the values you extracted -- but ONLY numbers you can actually read on the display. If the dashboard image does not clearly show the display (wrong angle, dark, blurry, something else in view), do NOT call report_sensors and never estimate or reuse old values: say "dashboard not readable" in your Observation and call emergency_alert once so a human can re-aim the camera.
 3. Look at the plant image for health assessment
 
 ## Agricultural Expert Knowledge

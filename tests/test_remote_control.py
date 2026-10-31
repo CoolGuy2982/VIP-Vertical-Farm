@@ -479,3 +479,12 @@ def test_swap_relabels_photos_and_records_swap_for_website(env):
     send(env, "swap_cameras")
     swaps = env.db.docs[f"grows/{DEVICE}"]["camera_swaps"]
     assert len(swaps) == 2 and swaps[0] <= swaps[1]
+
+
+def test_second_update_is_refused_while_one_runs(env):
+    env.remote._update_lock.acquire()
+    try:
+        d = send(env, "update_code", {"branch": "main"})
+        assert d["status"] == "error" and "already running" in d["error"]
+    finally:
+        env.remote._update_lock.release()

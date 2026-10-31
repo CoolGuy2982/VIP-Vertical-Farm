@@ -84,6 +84,11 @@ camera:
   resolution: [1280, 720]
   image_dir: "data/images"
   plant_rotation: 270    # 0=none, 90=CW, 180=flip, 270=CCW
+  # Exposure. auto_correct: the camera's auto-exposure, lowered automatically
+  # when the grow light blows the photo out (and back to auto when it's dark).
+  # Or "auto", or a fixed number (manual, V4L2 units ~1-5000), e.g.
+  #   exposure: {plant: auto_correct, dashboard: 150}
+  exposure: auto_correct
 
 # Gemini API
 gemini:

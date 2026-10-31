@@ -103,6 +103,13 @@ class Camera:
         self.warmup_frames = int(cam_config.get("warmup_frames", 15))
         self.retries = int(cam_config.get("retries", 2))
         self.use_mjpg = bool(cam_config.get("mjpg", True))
+        # Exposure: "auto_correct" (default) = camera auto-exposure, darkened
+        # automatically when the grow light blows the photo out; "auto" = leave
+        # it to the camera; a number = fixed manual exposure (V4L2 units, ~1-5000).
+        # One value for both cameras, or {plant: ..., dashboard: ...}.
+        self.exposure_setting = cam_config.get("exposure", "auto_correct")
+        # device -> manual exposure that auto_correct settled on
+        self._exposure: dict = {}
         self.image_dir = Path(cam_config.get("image_dir", "data/images"))
         if base_dir is not None and not self.image_dir.is_absolute():
             self.image_dir = Path(base_dir) / self.image_dir
@@ -113,6 +120,18 @@ class Camera:
         self._streams: dict = {}
         # Per-camera health, reported to the website
         self.health = {name: self._empty_health(name) for name in ("plant", "dashboard")}
+
+    def _exposure_for(self, cam_name: str):
+        value = self.exposure_setting
+        if isinstance(value, dict):
+            value = value.get(cam_name, "auto_correct")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        value = str(value).strip().lower()
+        try:
+            return float(value)
+        except ValueError:
+            return value if value in ("auto", "auto_correct") else "auto_correct"
 
     def _device_for(self, cam_name: str):
         return self.plant_device if cam_name == "plant" else self.dashboard_device
@@ -182,7 +201,7 @@ class Camera:
 
     # ------------------------------------------------------------------ capture
 
-    def _open(self, device):
+    def _open(self, device, cam_name: str | None = None):
         """Open a webcam, forcing the V4L2 backend and MJPG on Linux.
 
         MJPG matters on the Pi: uncompressed YUYV at 1280x720 needs most of a
@@ -200,7 +219,82 @@ class Camera:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.resolution[0])
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.resolution[1])
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        if cam_name:
+            self._apply_exposure(cap, device, cam_name)
         return cap
+
+    # ------------------------------------------------------------- exposure
+    # V4L2 (via OpenCV): CAP_PROP_AUTO_EXPOSURE 1 = manual, 3 = automatic.
+    # The setting lives in the camera, so it is set explicitly on every open.
+
+    def _apply_exposure(self, cap, device, cam_name: str):
+        setting = self._exposure_for(cam_name)
+        try:
+            if isinstance(setting, float):
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                cap.set(cv2.CAP_PROP_EXPOSURE, setting)
+            elif setting == "auto_correct" and device in self._exposure:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+                cap.set(cv2.CAP_PROP_EXPOSURE, self._exposure[device])
+            else:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+        except Exception as e:
+            logger.debug("%s cam: exposure control not available: %s", cam_name, e)
+
+    @staticmethod
+    def _light_stats(frame) -> tuple[float, float]:
+        """(fraction of blown-out pixels, mean brightness 0-255)."""
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        return float((gray >= 250).mean()), float(gray.mean())
+
+    @classmethod
+    def _too_bright(cls, frame) -> bool:
+        clipped, mean = cls._light_stats(frame)
+        return clipped > 0.04 or mean > 200
+
+    MIN_USABLE_BRIGHTNESS = 60   # darker than this and the plants are hard to see
+
+    def _correct_exposure(self, cap, device, cam_name: str, frame):
+        """Grow light blew the photo out: lower the exposure until the plants show."""
+        current = self._exposure.get(device) or cap.get(cv2.CAP_PROP_EXPOSURE)
+        if not current or current <= 1:
+            current = 300.0
+        cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+        # Only ever accept a frame that is still bright enough to show the plants:
+        # a washed-out photo is better than a black one.
+        best, best_exp = frame, None
+        best_clipped = self._light_stats(frame)[0]
+        changed = False
+        for _ in range(7):
+            current = max(1.0, round(current / 2))
+            cap.set(cv2.CAP_PROP_EXPOSURE, current)
+            for _ in range(4):                       # let the new exposure take effect
+                cap.read()
+            ok, f = cap.read()
+            if not ok or f is None:
+                break
+            clipped, mean = self._light_stats(f)
+            changed = changed or abs(mean - self._light_stats(frame)[1]) > 3
+            if mean < self.MIN_USABLE_BRIGHTNESS:
+                break                                # went too far: keep the previous step
+            if clipped < best_clipped:
+                best, best_exp, best_clipped = f, current, clipped
+            if not self._too_bright(f) or current <= 1:
+                break
+        if best_exp is None:
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+            if changed:
+                logger.info("%s cam: no darker exposure still showed the plants; "
+                            "keeping automatic exposure", cam_name)
+            else:
+                logger.warning("%s cam: photo is overexposed and the camera does not accept a "
+                               "manual exposure; try a dimmer angle or set camera.exposure", cam_name)
+            return frame
+        self._exposure[device] = best_exp
+        clipped, mean = self._light_stats(best)
+        logger.info("%s cam: grow light was too bright; exposure lowered to %s "
+                    "(%.0f%% blown out, brightness %.0f)", cam_name, best_exp, clipped * 100, mean)
+        return best
 
     def _read_one(self, device, cam_name: str):
         stream = self._streams.get(device)
@@ -215,7 +309,7 @@ class Camera:
                 self._last_reason = "live-view stream returned no frame"
                 logger.error("%s cam (%s) live stream returned no frame", cam_name, device)
             return frame
-        cap = self._open(device)
+        cap = self._open(device, cam_name)
         if cap is None:
             self._last_reason = ("could not be opened -- unplugged, wrong device, "
                                  "or in use by another program")
@@ -234,6 +328,19 @@ class Camera:
                 logger.error("%s cam (%s) opened but returned no frame (%d/%d warm-up "
                              "frames ok)", cam_name, device, good, self.warmup_frames)
                 return None
+            if self._exposure_for(cam_name) == "auto_correct":
+                if self._too_bright(frame):
+                    frame = self._correct_exposure(cap, device, cam_name, frame)
+                elif device in self._exposure and self._light_stats(frame)[1] < 45:
+                    # Darker now (e.g. light off): hand exposure back to the camera
+                    self._exposure.pop(device, None)
+                    cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+                    for _ in range(self.warmup_frames):
+                        cap.read()
+                    ok, f = cap.read()
+                    if ok and f is not None:
+                        frame = f
+                    logger.info("%s cam: scene got darker, back to automatic exposure", cam_name)
             return frame
         finally:
             cap.release()
@@ -271,6 +378,7 @@ class Camera:
                     return None
                 logger.info("%s photo saved: %s", cam_name, filepath)
                 self._mark(cam_name, True)
+                self.health[cam_name]["exposure"] = self._exposure.get(device, "auto")
                 return str(filepath)
             except Exception as e:
                 logger.error("%s cam error: %s", cam_name, e)
@@ -298,7 +406,7 @@ class Camera:
         with self._capture_lock:
             if device in self._streams:
                 return True
-            cap = self._open(device)
+            cap = self._open(device, cam_name)
             if cap is None:
                 self._mark(cam_name, False, f"{cam_name} camera ({device}) could not be "
                            "opened for live view")
@@ -323,6 +431,11 @@ class Camera:
                            "frames during live view")
                 return None
             self._mark(cam_name, True)
+            if device in self._exposure and self._light_stats(frame)[1] < 45:
+                # Light went off during live view: let the camera expose for the dark again
+                self._exposure.pop(device, None)
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 3)
+                logger.info("%s cam: scene got darker, back to automatic exposure", cam_name)
             return self._rotate(cam_name, frame)
 
     def stop_streams(self):
