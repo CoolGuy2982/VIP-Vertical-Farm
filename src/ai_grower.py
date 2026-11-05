@@ -72,6 +72,7 @@ class AIGrower:
         self._alert_log: list[dict] = []
         # Website link (set by main.py); receives live AI activity events
         self.remote = None
+        self._vivosun = None      # VIVOSUN cloud client, created on first use
         self.last_checkin: dict | None = None
         self._state_path = Path(base_dir) / "data" / "remote_state.json"
         self.paused = bool(self._load_state().get("paused", False))
@@ -104,6 +105,28 @@ class AIGrower:
         self._activity("system", "AI paused" if paused else "AI resumed")
         if not paused:
             self.scheduler.schedule_checkin(1, "Resumed from website")
+
+    def _read_controller(self):
+        """sensors.source: vivosun -> fetch the controller's readings before asking the AI.
+
+        Off by default (source: camera). On any failure the AI falls back to
+        reading the dashboard camera, as before.
+        """
+        if str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower() != "vivosun":
+            return
+        try:
+            if self._vivosun is None:
+                from .vivosun_cloud import VivosunCloud
+                self._vivosun = VivosunCloud.from_config(self.config)
+            reading = self._vivosun.read_climate()
+            self.sensors.update_from_controller(reading)
+            self._activity("cameras", "Sensors from VIVOSUN controller: "
+                           f"{reading.get('temperature_c')} C, {reading.get('humidity_pct')}%, "
+                           f"VPD {reading.get('vpd_kpa')} kPa")
+        except Exception as e:
+            logger.error("VIVOSUN controller readings unavailable (%s); the AI reads the "
+                         "dashboard camera instead", e)
+            self._activity("error", f"VIVOSUN controller readings unavailable: {e}")
 
     def _record_turn(self, trigger_type: str, level: int, system_prompt: str,
                      user_message: str, images: list[str]):
@@ -240,6 +263,7 @@ class AIGrower:
             if dashboard_image:
                 self.firebase.upload_image(dashboard_image, f"{trigger_type}_dashboard")
 
+            self._read_controller()
             sensor_data = self.sensors.read_all()
             self.context.log_sensors(sensor_data)
             self.firebase.log_sensors(sensor_data)

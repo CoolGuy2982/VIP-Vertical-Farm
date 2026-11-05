@@ -20,6 +20,9 @@ Pillow>=10.0
 # Firebase cloud backup
 firebase-admin>=6.0
 
+# VIVOSUN controller readings (request encryption); also pulled in by firebase-admin
+cryptography>=41
+
 # Raspberry Pi GPIO relay control
 RPi.GPIO>=0.7.1
 

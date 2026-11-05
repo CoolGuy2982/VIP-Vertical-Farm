@@ -118,6 +118,19 @@ remote:
   live_fps: 1.0
   github_repo: "https://github.com/CoolGuy2982/VIP-Vertical-Farm.git"
 
+# Where temperature / humidity / VPD come from.
+#   camera  (default): the AI reads the tent's VIVOSUN touchscreen through the
+#                      dashboard camera.
+#   vivosun: read them from the VIVOSUN GrowHub controller via VIVOSUN's cloud
+#            (src/vivosun_cloud.py; needs VIVOSUN_EMAIL / VIVOSUN_PASSWORD in
+#            .env). Falls back to the camera if the cloud fails. Test first with
+#            `python -m src.vivosun_cloud`. See docs/vivosun-sensors.md.
+sensors:
+  source: camera
+  vivosun:
+    device_name: null        # null = the first GrowHub controller on the account
+    max_age_minutes: 15
+
 # Local API server
 api:
   host: "0.0.0.0"
