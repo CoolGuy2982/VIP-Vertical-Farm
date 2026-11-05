@@ -164,3 +164,55 @@ def test_cloud_failure_falls_back_to_camera(monkeypatch, caplog):
     g._read_controller()
     assert "dashboard camera instead" in caplog.text
     assert g.sensors.read_all()["source"] == "dashboard_camera"
+
+
+def _loop_grower(reading_fn):
+    from src.ai_grower import AIGrower
+    g = AIGrower.__new__(AIGrower)
+    g.config = {"sensors": {"source": "vivosun", "vivosun": {"poll_minutes": 1, "log_minutes": 15}}}
+    g._vivosun = SimpleNamespace(read_climate=reading_fn)
+    g._controller_failing = False
+    g.sensors = Sensors({})
+    g.remote = None
+    g.logged = []
+    g.context = SimpleNamespace(log_sensors=lambda d: g.logged.append(("local", d)))
+    g.firebase = SimpleNamespace(log_sensors=lambda d: g.logged.append(("firebase", d)))
+    return g
+
+
+def test_climate_loop_keeps_website_live_and_logs_every_15_min(monkeypatch):
+    from src import ai_grower as ag
+    g = _loop_grower(lambda: {"temperature_c": 22.1, "humidity_pct": 80.0, "vpd_kpa": 0.5,
+                              "device": "Tent", "read_at": "now"})
+    clock = {"t": 1_000_000.0, "rounds": 0}
+    monkeypatch.setattr(ag.time, "time", lambda: clock["t"])
+
+    def sleep(s):
+        clock["rounds"] += 1
+        clock["t"] += s
+        if clock["rounds"] >= 3:
+            raise StopIteration
+    monkeypatch.setattr(ag.time, "sleep", sleep)
+    with pytest.raises(StopIteration):
+        g._climate_loop()
+    # 3 polls one minute apart: website value fresh, but only one saved reading
+    assert g.sensors.read_all()["temperature_c"] == 22.1
+    assert [kind for kind, _ in g.logged] == ["local", "firebase"]
+    saved = g.logged[1][1]
+    assert "note" not in saved and saved["source"].startswith("VIVOSUN") and saved["read_at"] == "now"
+
+
+def test_climate_loop_reports_an_outage_once(monkeypatch, caplog):
+    from src import ai_grower as ag
+    g = _loop_grower(lambda: (_ for _ in ()).throw(vc.VivosunError("cloud down")))
+    rounds = {"n": 0}
+
+    def sleep(s):
+        rounds["n"] += 1
+        if rounds["n"] >= 4:
+            raise StopIteration
+    monkeypatch.setattr(ag.time, "sleep", sleep)
+    with pytest.raises(StopIteration):
+        g._climate_loop()
+    assert caplog.text.count("VIVOSUN controller readings unavailable") == 1
+    assert g.logged == []

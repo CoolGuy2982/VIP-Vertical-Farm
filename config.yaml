@@ -130,6 +130,8 @@ sensors:
   vivosun:
     device_name: null        # null = the first GrowHub controller on the account
     max_age_minutes: 15
+    poll_minutes: 2          # how often the website's numbers are refreshed
+    log_minutes: 15          # how often a reading is saved for the trend charts
 
 # Local API server
 api:

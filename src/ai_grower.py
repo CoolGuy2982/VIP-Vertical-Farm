@@ -73,6 +73,7 @@ class AIGrower:
         # Website link (set by main.py); receives live AI activity events
         self.remote = None
         self._vivosun = None      # VIVOSUN cloud client, created on first use
+        self._controller_failing = False
         self.last_checkin: dict | None = None
         self._state_path = Path(base_dir) / "data" / "remote_state.json"
         self.paused = bool(self._load_state().get("paused", False))
@@ -106,27 +107,63 @@ class AIGrower:
         if not paused:
             self.scheduler.schedule_checkin(1, "Resumed from website")
 
-    def _read_controller(self):
-        """sensors.source: vivosun -> fetch the controller's readings before asking the AI.
+    def _uses_controller(self) -> bool:
+        return str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower() == "vivosun"
 
-        Off by default (source: camera). On any failure the AI falls back to
-        reading the dashboard camera, as before.
+    def _read_controller(self, announce: bool = True) -> bool:
+        """sensors.source: vivosun -> fetch the controller's readings.
+
+        Called before every check-in (announce=True: shown in the AI activity
+        feed) and every few minutes by _climate_loop for the website. Off by
+        default (source: camera). On failure the AI falls back to reading the
+        dashboard camera, as before.
         """
-        if str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower() != "vivosun":
-            return
+        if not self._uses_controller():
+            return False
         try:
             if self._vivosun is None:
                 from .vivosun_cloud import VivosunCloud
                 self._vivosun = VivosunCloud.from_config(self.config)
             reading = self._vivosun.read_climate()
             self.sensors.update_from_controller(reading)
-            self._activity("cameras", "Sensors from VIVOSUN controller: "
-                           f"{reading.get('temperature_c')} C, {reading.get('humidity_pct')}%, "
-                           f"VPD {reading.get('vpd_kpa')} kPa")
+            if announce:
+                self._activity("cameras", "Sensors from VIVOSUN controller: "
+                               f"{reading.get('temperature_c')} C, {reading.get('humidity_pct')}%, "
+                               f"VPD {reading.get('vpd_kpa')} kPa")
+            if self._controller_failing:
+                logger.info("VIVOSUN controller readings are back")
+            self._controller_failing = False
+            return True
         except Exception as e:
-            logger.error("VIVOSUN controller readings unavailable (%s); the AI reads the "
-                         "dashboard camera instead", e)
-            self._activity("error", f"VIVOSUN controller readings unavailable: {e}")
+            # Log once per outage, not every poll
+            if announce or not self._controller_failing:
+                logger.error("VIVOSUN controller readings unavailable (%s); the AI reads the "
+                             "dashboard camera instead", e)
+                self._activity("error", f"VIVOSUN controller readings unavailable: {e}")
+            self._controller_failing = True
+            return False
+
+    def _climate_loop(self):
+        """Keep the website's climate numbers live and the trend charts filled.
+
+        Polls the controller every sensors.vivosun.poll_minutes (default 2) and
+        saves a reading every log_minutes (default 15) to the sensor log and
+        Firestore (sensor_readings), which the website's charts use.
+        """
+        last_log = 0.0
+        while True:
+            opts = (self.config.get("sensors", {}) or {}).get("vivosun", {}) or {}
+            poll_s = max(60.0, 60 * float(opts.get("poll_minutes", 2)))
+            if self._uses_controller() and self._read_controller(announce=False):
+                if time.time() - last_log >= 60 * float(opts.get("log_minutes", 15)):
+                    data = {k: v for k, v in self.sensors.read_all().items() if k != "note"}
+                    try:
+                        self.context.log_sensors(data)
+                        self.firebase.log_sensors(data)
+                        last_log = time.time()
+                    except Exception as e:
+                        logger.warning("could not save controller reading: %s", e)
+            time.sleep(poll_s)
 
     def _record_turn(self, trigger_type: str, level: int, system_prompt: str,
                      user_message: str, images: list[str]):
@@ -167,6 +204,10 @@ class AIGrower:
         logger.info("=" * 60)
         self.scheduler.start()
         self.firebase.start()
+        if self._uses_controller():
+            import threading
+            threading.Thread(target=self._climate_loop, name="vivosun-climate", daemon=True).start()
+            logger.info("Climate readings: VIVOSUN controller (polled every few minutes)")
         self.scheduler.schedule_checkin(1, "Initial startup check-in")
 
     def _handle_checkin_action(self, action: ScheduledAction):

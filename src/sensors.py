@@ -37,6 +37,7 @@ class Sensors:
                 "outside_humidity_pct", "outside_vpd_kpa")
         cleaned = {k: reading[k] for k in keep if reading.get(k) is not None}
         cleaned["source"] = f"VIVOSUN controller ({reading.get('device', '?')})"
+        cleaned["read_at"] = reading.get("read_at")
         cleaned["note"] = (f"Measured by the VIVOSUN controller at {reading.get('read_at', '?')}. "
                            "No need to read the dashboard or call report_sensors. "
                            "Soil moisture is NOT measured: judge it from the rockwool colour.")
