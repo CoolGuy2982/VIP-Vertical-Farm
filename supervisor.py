@@ -158,12 +158,77 @@ def rollback(state: dict, base: Path = BASE) -> str:
 
 # --------------------------------------------------------------------------- supervisor
 
+class CrashMailer:
+    """Email on crashes (same settings as src/notifier.py, kept self-contained).
+
+    At most one email per MIN_GAP_S, so a crash loop sends one, not hundreds.
+    """
+    MIN_GAP_S = 1800
+
+    def __init__(self, base: Path):
+        self.base = base
+        self.state = base / "data" / "supervisor_alert_state.json"
+        self.cfg, self.env = {}, {}
+        try:
+            import yaml
+            cfg = yaml.safe_load((base / "config.yaml").read_text(encoding="utf-8")) or {}
+            self.cfg = (cfg.get("alerts", {}) or {}).get("email", {}) or {}
+            self.device = (cfg.get("firebase", {}) or {}).get("device_id", "raspPi4")
+        except Exception:
+            self.device = "raspPi4"
+        try:
+            from dotenv import dotenv_values
+            self.env = {k: v for k, v in dotenv_values(base / ".env").items() if v}
+        except Exception:
+            pass
+
+    def _get(self, name):
+        return (os.environ.get(name) or self.env.get(name) or "").strip()
+
+    def send(self, subject: str, body: str):
+        user, password = self._get("ALERT_SMTP_USER"), self._get("ALERT_SMTP_PASSWORD").replace(" ", "")
+        to = str(self.cfg.get("to") or self._get("ALERT_EMAIL_TO"))
+        if not (user and password and to) or self.cfg.get("enabled", True) is False:
+            return
+        try:
+            last = float(json.loads(self.state.read_text()).get("last", 0))
+        except Exception:
+            last = 0.0
+        if time.time() - last < self.MIN_GAP_S:
+            return
+        try:
+            self.state.parent.mkdir(parents=True, exist_ok=True)
+            self.state.write_text(json.dumps({"last": time.time()}))
+        except Exception:
+            pass
+
+        def _go():
+            try:
+                import smtplib
+                from email.message import EmailMessage
+                msg = EmailMessage()
+                msg["From"], msg["To"] = f"VIP Vertical Farm <{user}>", to
+                msg["Subject"] = f"[VIP Farm] {subject}"
+                website = self.cfg.get("website_url")
+                msg.set_content(body + f"\n\n--\nSent by the supervisor on {self.device}."
+                                + (f"\nDashboard: {website}" if website else ""))
+                with smtplib.SMTP_SSL(self.cfg.get("smtp_host", "smtp.gmail.com"),
+                                      int(self.cfg.get("smtp_port", 465)), timeout=20) as smtp:
+                    smtp.login(user, password)
+                    smtp.send_message(msg)
+                log(f"crash email sent to {to}")
+            except Exception as e:
+                log(f"could not send crash email: {e}")
+        threading.Thread(target=_go, daemon=True).start()
+
+
 class Supervisor:
     def __init__(self, base: Path = BASE, cmd: list[str] | None = None,
-                 reporter: Reporter | None = None):
+                 reporter: Reporter | None = None, mailer: CrashMailer | None = None):
         self.base = base
         self.cmd = cmd or CHILD_CMD
         self.reporter = reporter if reporter is not None else Reporter(base)
+        self.mailer = mailer if mailer is not None else CrashMailer(base)
         self.child: subprocess.Popen | None = None
         self.stopping = False
         self.tail: deque = deque(maxlen=80)
@@ -246,6 +311,11 @@ class Supervisor:
         # last_crash stays in live/status after the grower is back up
         self.reporter.status({"state": "crashed", **crash, "restarts": self.restarts,
                               "restart_in_s": delay, "supervised": True, "last_crash": crash})
+        self.mailer.send(
+            "Grower crashed" + (" and an update was rolled back" if rolled else ""),
+            f"The grower stopped unexpectedly (exit code {code}) after running {int(ran_s)} s"
+            + (f". {rolled}." if rolled else ".")
+            + f" It restarts automatically in {delay} s.\n\nLast log lines:\n" + "\n".join(tail[-25:]))
         return delay
 
     def loop(self):

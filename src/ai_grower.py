@@ -11,6 +11,7 @@ from .context_manager import ContextManager
 from .firebase_sync import FirebaseSync
 from .gemini_client import GeminiClient
 from .growth_tracker import GrowthTracker
+from .notifier import Notifier
 from .sensors import Sensors
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,7 @@ class AIGrower:
         self._alert_log: list[dict] = []
         # Website link (set by main.py); receives live AI activity events
         self.remote = None
+        self.notifier = Notifier(config, base_dir)     # email alerts (src/notifier.py)
         self._vivosun = None      # VIVOSUN cloud client, created on first use
         self._controller_failing = False
         self.last_checkin: dict | None = None
@@ -768,7 +770,17 @@ class AIGrower:
         self._alert_log.append(alert)
         self.firebase.log_alert(alert)
         logger.warning("ALERT [%s]: %s", severity, message)
-        return {"logged": True, **alert}
+        critical = str(severity).lower() == "critical"
+        sensors = {k: v for k, v in self.sensors.read_all().items()
+                   if k in ("temperature_c", "humidity_pct", "vpd_kpa", "source")}
+        emailed = self.notifier.notify(
+            f"ai_alert:{severity}",
+            f"{'CRITICAL' if critical else 'Warning'}: {message[:90]}",
+            f"The AI grower raised a {severity} alert on day {alert['day']}:\n\n{message}\n\n"
+            f"Latest climate: {json.dumps(sensors)}\n"
+            "Check the live view and the AI activity on the dashboard.",
+            repeat_hours=1 if critical else None)
+        return {"logged": True, "emailed": emailed, **alert}
 
     def get_status(self) -> dict:
         return {

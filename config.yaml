@@ -149,3 +149,12 @@ firebase:
 alerts:
   critical_temp_c: [5, 40]
   critical_moisture_pct: [10, 95]
+  # Email alerts (src/notifier.py). Sender login goes in .env:
+  #   ALERT_SMTP_USER=<gmail address>   ALERT_SMTP_PASSWORD=<Gmail app password>
+  email:
+    to: vip.vf.purdue@gmail.com
+    smtp_host: smtp.gmail.com
+    smtp_port: 465
+    min_hours_between_repeats: 6
+    max_per_day: 12
+    website_url: https://vertical-farm-interface-852020329952.us-central1.run.app

@@ -214,7 +214,7 @@ class RemoteControl:
         "live_stop", "set_cameras", "swap_cameras", "set_plant",
         "set_schedule", "get_logs", "restart", "reboot", "update_code",
         "ping", "reset_ai_memory", "get_ai_memory", "get_config", "set_config",
-        "get_prompt", "set_prompt",
+        "get_prompt", "set_prompt", "test_email",
     }
 
     def __init__(self, grower, config: dict, base_dir: str, log_buffer: LogBuffer | None):
@@ -241,6 +241,7 @@ class RemoteControl:
         self._link_down_since: float | None = None
         self._last_link_warning = 0.0
         self._version_cache: tuple[float, dict | None] = (0.0, None)
+        self._problem_first_seen: dict[str, float] = {}
 
         self.live_until = 0.0
         self.live_cams: list[str] = ["plant", "dashboard"]
@@ -330,6 +331,10 @@ class RemoteControl:
         while self._running:
             self._heartbeat_tick = time.time()
             try:
+                self._email_problems()
+            except Exception as e:
+                logger.debug("problem alert check failed: %s", e)
+            try:
                 self._write_status()
                 if self.logs.seq != self._last_logs_seq:
                     self._write_logs()
@@ -379,6 +384,36 @@ class RemoteControl:
                 pass
             self.request_restart()
             return
+
+    # Problems that are deliberate, not something to email about
+    QUIET_PROBLEMS = {"paused"}
+    PROBLEM_GRACE_S = 60        # must last this long (camera blips, restarts)
+
+    def _email_problems(self):
+        """Email when a website-banner problem appears (and when it clears)."""
+        notifier = getattr(self.grower, "notifier", None)
+        if notifier is None:
+            return
+        now = time.time()
+        current = {p["id"]: p for p in self._problems() if p["id"] not in self.QUIET_PROBLEMS}
+        for pid, p in current.items():
+            first = self._problem_first_seen.setdefault(pid, now)
+            if now - first < self.PROBLEM_GRACE_S:
+                continue
+            notifier.notify(
+                f"problem:{pid}", p["title"],
+                f"{p['title']}\n\n{p.get('detail') or ''}\n"
+                + (f"\nSince: {p['since']}" if p.get("since") else "")
+                + "\n\nYou get one email per problem (repeated every few hours while it lasts) "
+                  "and one when it clears.")
+        for pid in list(self._problem_first_seen):
+            if pid in current:
+                continue
+            self._problem_first_seen.pop(pid)
+            if notifier.was_sent(f"problem:{pid}"):
+                notifier.forget(f"problem:{pid}")
+                notifier.notify(f"resolved:{pid}:{int(now)}", f"Resolved: {pid.replace('_', ' ')}",
+                                "The problem reported earlier has cleared.")
 
     def _write_logs(self):
         self._last_logs_seq = self.logs.seq
@@ -451,6 +486,8 @@ class RemoteControl:
                 "plant": {k: self.config.get("plant", {}).get(k)
                           for k in ("species", "variety", "planted_date")},
                 "sensor_source": str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower(),
+                "email_alerts": (self.grower.notifier.describe()
+                                 if getattr(self.grower, "notifier", None) else None),
                 "scheduler": {
                     "min_checkin_minutes": sched.min_checkin_minutes,
                     "max_checkin_minutes": sched.max_checkin_minutes,
@@ -1283,6 +1320,17 @@ class RemoteControl:
         return {"message": "Prompt saved; used from the next check-in",
                 "unknown_placeholders": unknown,
                 "rendered_chars": len(ctx.build_system_prompt())}
+
+    # ------------------------------------------------------------ commands: email
+
+    def cmd_test_email(self, args, cmd_id):
+        notifier = getattr(self.grower, "notifier", None)
+        if notifier is None:
+            raise RuntimeError("email alerts are not available in this version")
+        notifier.send_now("Test email",
+                          "This is a test from the VIP Vertical Farm grower. Alert emails will "
+                          "arrive like this one when something goes wrong.")
+        return {"message": f"Test email sent to {notifier.to}"}
 
     # ------------------------------------------------------------ restart
 
