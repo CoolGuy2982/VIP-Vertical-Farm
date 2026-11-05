@@ -216,3 +216,30 @@ def test_climate_loop_reports_an_outage_once(monkeypatch, caplog):
         g._climate_loop()
     assert caplog.text.count("VIVOSUN controller readings unavailable") == 1
     assert g.logged == []
+
+
+def test_prompt_says_climate_is_measured_only_in_vivosun_mode(tmp_path):
+    import shutil
+    from pathlib import Path
+    from src.context_manager import ContextManager
+    import yaml
+    repo = Path(__file__).resolve().parent.parent
+    (tmp_path / "prompts").mkdir()
+    shutil.copy(repo / "prompts" / "system_prompt.md", tmp_path / "prompts" / "system_prompt.md")
+    cfg = yaml.safe_load((repo / "config.yaml").read_text(encoding="utf-8"))
+    assert "Climate data" not in ContextManager(str(tmp_path), cfg).build_system_prompt()
+    cfg["sensors"]["source"] = "vivosun"
+    prompt = ContextManager(str(tmp_path), cfg).build_system_prompt()
+    assert prompt.rstrip().endswith("only report numbers you can read.")
+    assert "MEASURED by the VIVOSUN GrowHub controller" in prompt and "Hard Limits" in prompt
+
+
+def test_capture_dashboard_tool_not_needed_with_fresh_controller_data():
+    from src.ai_grower import AIGrower
+    g = AIGrower.__new__(AIGrower)
+    g.config = {"sensors": {"source": "vivosun"}}
+    g.sensors = Sensors({})
+    g.camera = SimpleNamespace(capture_dashboard=lambda label: pytest.fail("camera used"))
+    g.sensors.update_from_controller({"temperature_c": 22.0, "device": "Tent", "read_at": "now"})
+    r = g._execute_tool("capture_dashboard", {})
+    assert r["captured"] is False and "VIVOSUN controller" in r["note"]

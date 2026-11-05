@@ -272,20 +272,26 @@ class AIGrower:
             # Collect historical plant photos BEFORE capturing new ones
             historical_plant = self.camera.get_recent_plant_images(count=4)
 
+            # Climate from the VIVOSUN controller (sensors.source: vivosun). When
+            # that works the dashboard camera isn't used; it's only the fallback.
+            controller_ok = self._read_controller()
+
             # Failsafe: test camera availability before toggling lights
-            dashboard_image = self.camera.capture_dashboard(trigger_type)
+            dashboard_image = None if controller_ok else self.camera.capture_dashboard(trigger_type)
             test_plant = self.camera.capture_plant("test")
 
             self._activity(
                 "cameras",
                 "Cameras: plant " + ("OK" if test_plant else "FAILED")
-                + ", dashboard " + ("OK" if dashboard_image else "FAILED"))
+                + (", dashboard not needed (controller readings)" if controller_ok
+                   else ", dashboard " + ("OK" if dashboard_image else "FAILED")))
 
             if not dashboard_image and not test_plant:
-                self._record_alert("Both cameras failed. Hardware failure.", "critical")
+                what = "Plant camera failed" if controller_ok else "Both cameras failed"
+                self._record_alert(f"{what}. Hardware failure.", "critical")
                 self.last_checkin = {"at": started_at, "ok": False, "trigger": trigger_type,
-                                     "error": "Both cameras failed, AI was not called"}
-                self._activity("error", "Check-in stopped: both cameras failed")
+                                     "error": f"{what}, AI was not called"}
+                self._activity("error", f"Check-in stopped: {what.lower()}")
                 self.scheduler.schedule_checkin(60, "Retry after hardware failure")
                 return
 
@@ -304,7 +310,6 @@ class AIGrower:
             if dashboard_image:
                 self.firebase.upload_image(dashboard_image, f"{trigger_type}_dashboard")
 
-            self._read_controller()
             sensor_data = self.sensors.read_all()
             self.context.log_sensors(sensor_data)
             self.firebase.log_sensors(sensor_data)
@@ -560,6 +565,10 @@ class AIGrower:
                         "camera": "plant"}
 
             elif name == "capture_dashboard":
+                if self._uses_controller() and self.sensors.controller_fresh():
+                    return {"captured": False, "camera": "dashboard",
+                            "note": "Not needed: temperature, humidity and VPD come from the "
+                                    "VIVOSUN controller (see Current State)."}
                 path = self.camera.capture_dashboard("tool_capture")
                 if path:
                     self.firebase.upload_image(path, "tool_dashboard")

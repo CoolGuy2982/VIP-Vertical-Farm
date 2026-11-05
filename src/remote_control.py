@@ -450,6 +450,7 @@ class RemoteControl:
             "settings": {
                 "plant": {k: self.config.get("plant", {}).get(k)
                           for k in ("species", "variety", "planted_date")},
+                "sensor_source": str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower(),
                 "scheduler": {
                     "min_checkin_minutes": sched.min_checkin_minutes,
                     "max_checkin_minutes": sched.max_checkin_minutes,

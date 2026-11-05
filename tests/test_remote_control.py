@@ -110,6 +110,7 @@ def test_heartbeat_status(env):
     assert s["health"] in ("ok", "warning", "error")
     assert s["actuators"]["water_budget"]["limits"]["ai_max_seconds_per_day"] == 45
     assert s["grower"]["paused"] is False
+    assert s["settings"]["sensor_source"] == "camera"
 
 
 def test_ping_via_live_listener(env):

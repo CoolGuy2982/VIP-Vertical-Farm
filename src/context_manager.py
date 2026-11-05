@@ -291,10 +291,27 @@ class ContextManager:
             "emergency: wait for the next allowed time and do not retry before then."
         )
 
+    def sensor_source_section(self) -> str:
+        """Added after the (editable) template, so it wins over its dashboard steps."""
+        if str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower() != "vivosun":
+            return ""
+        return (
+            "\n\n## Climate data (this replaces any instructions above about reading the dashboard)\n"
+            "- Temperature, humidity and VPD are MEASURED by the VIVOSUN GrowHub controller and "
+            "listed under Current State (source: VIVOSUN controller), with outside readings too. "
+            "Use those numbers; they are exact.\n"
+            "- You will normally get no dashboard photo. Do not call capture_dashboard or "
+            "report_sensors.\n"
+            "- The controller does NOT measure soil or rockwool moisture: judge it from the plant "
+            "photo (rockwool colour) and say it is an estimate.\n"
+            "- If Current State says source: dashboard_camera, the controller was unavailable this "
+            "time: then read the dashboard photo as before, and only report numbers you can read."
+        )
+
     def build_system_prompt(self) -> str:
         template, _ = self.get_prompt_template()
         return (self.render_prompt(template, self.prompt_variables()).rstrip()
-                + "\n\n" + self.hard_limits_section())
+                + "\n\n" + self.hard_limits_section() + self.sensor_source_section())
 
     def build_context_message(self, current_sensors: dict, sensor_trends: dict,
                                pending_actions: list = None,
