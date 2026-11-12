@@ -116,6 +116,7 @@ class Camera:
         self.image_dir.mkdir(parents=True, exist_ok=True)
         # Rotation: 0=none, 90=clockwise, 180=flip, 270=counter-clockwise
         self.plant_rotation = cam_config.get("plant_rotation", 0)
+        self.dashboard_rotation = cam_config.get("dashboard_rotation", 0)
         # Cameras held open for the website live view: device -> cv2.VideoCapture
         self._streams: dict = {}
         # Per-camera health, reported to the website
@@ -154,7 +155,8 @@ class Camera:
             h["last_error_at"] = now
             h["consecutive_failures"] = h.get("consecutive_failures", 0) + 1
 
-    def set_devices(self, plant=None, dashboard=None, plant_rotation=None):
+    def set_devices(self, plant=None, dashboard=None, plant_rotation=None,
+                    dashboard_rotation=None):
         """Change camera devices / rotation at runtime (from the website)."""
         with self._capture_lock:
             self.stop_streams()
@@ -164,6 +166,8 @@ class Camera:
                 self.dashboard_device = self.dashboard_index = self._parse_device(dashboard)
             if plant_rotation is not None:
                 self.plant_rotation = int(plant_rotation)
+            if dashboard_rotation is not None:
+                self.dashboard_rotation = int(dashboard_rotation)
             self.health = {n: self._empty_health(n) for n in ("plant", "dashboard")}
 
     @staticmethod
@@ -386,14 +390,14 @@ class Camera:
                 return None
 
     def _rotate(self, cam_name: str, frame):
-        if cam_name == "plant" and self.plant_rotation:
-            _rot_map = {
-                90:  cv2.ROTATE_90_CLOCKWISE,
-                180: cv2.ROTATE_180,
-                270: cv2.ROTATE_90_COUNTERCLOCKWISE,
-            }
-            if self.plant_rotation in _rot_map:
-                frame = cv2.rotate(frame, _rot_map[self.plant_rotation])
+        rotation = self.plant_rotation if cam_name == "plant" else self.dashboard_rotation
+        _rot_map = {
+            90:  cv2.ROTATE_90_CLOCKWISE,
+            180: cv2.ROTATE_180,
+            270: cv2.ROTATE_90_COUNTERCLOCKWISE,
+        }
+        if rotation in _rot_map:
+            frame = cv2.rotate(frame, _rot_map[rotation])
         return frame
 
     # ------------------------------------------------------------- live view

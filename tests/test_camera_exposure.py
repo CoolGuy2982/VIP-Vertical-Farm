@@ -110,3 +110,14 @@ def test_live_view_goes_back_to_auto_when_the_light_goes_off(cam):
     webcam.scene = 0.02                    # light off
     c.read_stream_frame("plant")
     assert 0 not in c._exposure and webcam.auto is True
+
+
+def test_dashboard_can_be_flipped_upside_down(tmp_path):
+    c = Camera({"camera": {"dashboard_rotation": 180, "plant_rotation": 0}}, base_dir=tmp_path)
+    frame = np.zeros((2, 3, 3), np.uint8)
+    frame[0, 0] = 255                                   # top-left pixel
+    flipped = c._rotate("dashboard", frame)
+    assert flipped[1, 2, 0] == 255 and flipped[0, 0, 0] == 0   # now bottom-right
+    assert (c._rotate("plant", frame) == frame).all()
+    c.set_devices(dashboard_rotation=0)
+    assert (c._rotate("dashboard", frame) == frame).all()

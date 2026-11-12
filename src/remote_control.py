@@ -185,9 +185,10 @@ def validate_config(cfg) -> list[str]:
     num("scheduler.min_checkin_minutes", 1, 1440)
     num("scheduler.max_checkin_minutes", 1, 1440)
     num("hardware_specs.flow_rate_ml_s", 1, 10000)
-    rot = (cfg.get("camera") or {}).get("plant_rotation")
-    if rot is not None and rot not in (0, 90, 180, 270):
-        errors.append("camera.plant_rotation must be 0, 90, 180 or 270")
+    for key in ("plant_rotation", "dashboard_rotation"):
+        rot = (cfg.get("camera") or {}).get(key)
+        if rot is not None and rot not in (0, 90, 180, 270):
+            errors.append(f"camera.{key} must be 0, 90, 180 or 270")
     return errors
 
 
@@ -474,6 +475,7 @@ class RemoteControl:
                 "plant_device": str(cam.plant_device),
                 "dashboard_device": str(cam.dashboard_device),
                 "plant_rotation": cam.plant_rotation,
+                "dashboard_rotation": getattr(cam, "dashboard_rotation", 0),
                 "available": self._list_cameras(),
             },
             "live": {
@@ -941,15 +943,17 @@ class RemoteControl:
             changes["plant_cam"] = str(args["plant_cam"]).strip()
         if args.get("dashboard_cam") not in (None, ""):
             changes["dashboard_cam"] = str(args["dashboard_cam"]).strip()
-        if args.get("plant_rotation") not in (None, ""):
-            rot = int(args["plant_rotation"])
-            if rot not in (0, 90, 180, 270):
-                raise ValueError("rotation must be 0, 90, 180 or 270")
-            changes["plant_rotation"] = rot
+        for key in ("plant_rotation", "dashboard_rotation"):
+            if args.get(key) not in (None, ""):
+                rot = int(args[key])
+                if rot not in (0, 90, 180, 270):
+                    raise ValueError("rotation must be 0, 90, 180 or 270")
+                changes[key] = rot
         if not changes:
             raise ValueError("nothing to change")
         cam.set_devices(plant=changes.get("plant_cam"), dashboard=changes.get("dashboard_cam"),
-                        plant_rotation=changes.get("plant_rotation"))
+                        plant_rotation=changes.get("plant_rotation"),
+                        dashboard_rotation=changes.get("dashboard_rotation"))
         self._save_local({"camera": changes})
         return {"message": "Camera settings saved", **changes}
 

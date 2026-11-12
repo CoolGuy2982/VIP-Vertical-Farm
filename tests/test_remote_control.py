@@ -488,3 +488,13 @@ def test_second_update_is_refused_while_one_runs(env):
         assert d["status"] == "error" and "already running" in d["error"]
     finally:
         env.remote._update_lock.release()
+
+
+def test_set_dashboard_rotation_from_website(env):
+    calls = {}
+    env.grower.camera.set_devices = lambda **k: calls.update(k)
+    d = send(env, "set_cameras", {"dashboard_rotation": 180})
+    assert d["status"] == "done" and calls["dashboard_rotation"] == 180
+    assert load_config(env.base)["camera"]["dashboard_rotation"] == 180
+    assert send(env, "set_cameras", {"dashboard_rotation": 45})["status"] == "error"
+    assert rc.validate_config({**load_config(env.base), "camera": {"dashboard_rotation": 7}})
