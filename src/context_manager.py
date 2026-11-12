@@ -238,10 +238,11 @@ class ContextManager:
         h_specs = self.config.get("hardware_specs", {})
         if day <= 6:
             stage_guidance = (
-                "- **Early germination (Days 1-6)**: No visible sprouts yet - the rockwool"
-                " texture can look like sprouts but is not. Focus on keeping rockwool dark/moist"
-                " and establishing baseline sensor readings. Do NOT log germination milestones"
-                " until Day 7+ with clear visual evidence.\n"
+                "- **Germination (Days 0-6)**: Lettuce germinates best WITH light, and seedlings"
+                " stretch (thin, pale, falling over) within a day or two in the dark, so keep the"
+                " grow light on for this stage's photoperiod from day 0. Keep the surface evenly"
+                " moist but not waterlogged. The medium's texture can look like sprouts: do not"
+                " log a germination milestone until sprouts are clearly visible in the photo.\n"
                 "- Calibrate your mental model of the hardware: pump rate, light response, sensor read cadence."
             )
         else:
@@ -263,6 +264,7 @@ class ContextManager:
             "ideal_soil_moisture_pct": stage.get("ideal_soil_moisture_pct", "N/A"),
             "light_hours": stage.get("light_hours", "N/A"),
             "tray_tilt_degrees": h_specs.get("tray_tilt_degrees", 0),
+            "growing_medium": plant.get("growing_medium", "growing medium"),
             "flow_rate": h_specs.get("flow_rate_ml_s", 1),
             "stage_guidance": stage_guidance,
         }

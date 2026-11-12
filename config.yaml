@@ -4,13 +4,16 @@ plant:
   species: "Lettuce"
   variety: "Diversified Lettuce Tray"
   planted_date: "2026-10-08"
+  # What the seeds are sown in (used in the AI's prompt). Change it here or in
+  # the website's config editor if this isn't accurate.
+  growing_medium: "loose brown growing medium (soil / coco coir type)"
   growth_stages:
     - name: "germination"
       typical_days: [0, 7]
       ideal_temp_c: [22, 28]
       ideal_humidity_pct: [70, 90]
       ideal_soil_moisture_pct: [60, 80]
-      light_hours: 0
+      light_hours: 16          # lettuce needs light to germinate; in the dark it stretches and falls over
     - name: "seedling"
       typical_days: [7, 21]
       ideal_temp_c: [20, 26]

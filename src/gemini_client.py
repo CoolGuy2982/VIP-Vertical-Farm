@@ -71,7 +71,7 @@ GROWER_TOOLS = [
             "Run the water pump for a precise number of seconds via the Kasa cloud. "
             "IMPORTANT: The cloud API adds ~2-3s of latency on both ON and OFF commands — "
             "always add 5s of buffer to your target duration. "
-            "A full 18-row tray watering requires ~40 seconds; anything under 20s will not "
+            "A full tray watering requires ~40 seconds; anything under 20s will not wet the whole tray "
             "reach all rows. NEVER run if soil moisture is above 65%. Always log the reason. "
             "The controller enforces a hard daily water budget (per-dose cap, daily cap "
             "and minimum gap between doses, shown in the check-in context). Doses beyond "
