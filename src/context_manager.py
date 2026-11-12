@@ -289,9 +289,16 @@ class ContextManager:
             f"{wb['ai_max_seconds_per_day'] * flow_rate / 1000:.1f} L), and at least "
             f"{wb['ai_min_minutes_between_doses']:.0f} minutes between doses. A dose over the "
             "limit is shortened or refused, and the tool result says when the next dose is "
-            "allowed. Plan for about one full watering per day. A refused dose is not an "
-            "emergency: wait for the next allowed time and do not retry before then."
+            f"allowed. That is enough for about {self._full_waterings(wb)} per day (a full "
+            "tray watering is ~40 s): use the extra only when the plants need it, not by "
+            "default. A refused dose is not an emergency: wait for the next allowed time and "
+            "do not retry before then."
         )
+
+    @staticmethod
+    def _full_waterings(wb: dict) -> str:
+        n = max(1, round(wb["ai_max_seconds_per_day"] / 40))
+        return "one full watering" if n == 1 else f"{n} full waterings"
 
     def build_system_prompt(self) -> str:
         template, _ = self.get_prompt_template()

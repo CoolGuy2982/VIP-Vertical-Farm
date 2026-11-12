@@ -61,8 +61,8 @@ water_pump:
   # Rolling 24 h windows, persisted in data/pump_doses.json so restarts don't reset it.
   # Code ceilings: AI <= 120 s/day, gap >= 30 min, manual <= 300 s/day.
   budget:
-    ai_max_seconds_per_day: 45         # AI tool calls + scheduled pump actions (~7.5 L at 168 mL/s)
-    ai_min_minutes_between_doses: 180
+    ai_max_seconds_per_day: 90         # AI tool calls + scheduled pump actions (~15 L at 168 mL/s, ~2 full waterings)
+    ai_min_minutes_between_doses: 120
     manual_max_seconds_per_day: 120    # website / local API / startup test, counted separately
 
 # Grow light

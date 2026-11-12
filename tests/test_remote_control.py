@@ -108,7 +108,7 @@ def test_heartbeat_status(env):
     s = status(env)
     assert s["supervisor"]["state"] == "running"
     assert s["health"] in ("ok", "warning", "error")
-    assert s["actuators"]["water_budget"]["limits"]["ai_max_seconds_per_day"] == 45
+    assert s["actuators"]["water_budget"]["limits"]["ai_max_seconds_per_day"] == env.config["water_pump"]["budget"]["ai_max_seconds_per_day"]
     assert s["grower"]["paused"] is False
 
 
