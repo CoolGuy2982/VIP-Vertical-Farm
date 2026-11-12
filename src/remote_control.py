@@ -485,7 +485,6 @@ class RemoteControl:
             "settings": {
                 "plant": {k: self.config.get("plant", {}).get(k)
                           for k in ("species", "variety", "planted_date")},
-                "sensor_source": str((self.config.get("sensors", {}) or {}).get("source", "camera")).lower(),
                 "email_alerts": (self.grower.notifier.describe()
                                  if getattr(self.grower, "notifier", None) else None),
                 "scheduler": {
