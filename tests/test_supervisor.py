@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 import shutil
 import subprocess
 import sys
@@ -118,3 +119,21 @@ def test_loop_restarts_on_42_and_marks_restarts(tmp_path):
     assert not (tmp_path / "config.local.yaml").exists()      # crash -> rolled back
     assert rep.commands and rep.commands[0][0] == "c9"
     assert rep.statuses[-1]["state"] == "stopped"
+
+
+def test_pump_switched_off_after_crash_but_not_after_clean_exit(tmp_path):
+    # run 1 crashes (exit 3), run 2 exits cleanly (0)
+    child = ("import pathlib, sys; p = pathlib.Path('runs.txt'); "
+             "n = len(p.read_text()) if p.exists() else 0; p.write_text('x' * (n + 1)); "
+             "sys.exit([3, 0][min(n, 1)])")
+    sup = None
+    offs = []
+
+    def on_status(s):
+        if s["state"] == "starting" and s["restarts"] >= 1:
+            sup.stopping = True
+    sup = sv.Supervisor(tmp_path, cmd=[sys.executable, "-c", child],
+                        reporter=FakeReporter(on_status), mailer=SimpleNamespace(send=lambda *a: None))
+    sup.pump_off = lambda base: offs.append(base)
+    sup.loop()
+    assert offs == [tmp_path]            # once, for the crash (exit 3); not for the clean exit

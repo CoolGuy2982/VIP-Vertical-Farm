@@ -80,14 +80,14 @@ def test_corrupt_log_fails_closed(tmp_path):
 
 
 def test_config_cannot_exceed_code_ceilings(tmp_path):
-    loose = {"water_pump": {"max_seconds_per_dose": 600, "budget": {
+    loose = {"water_pump": {"max_seconds_per_dose": 99999, "budget": {
         "ai_max_seconds_per_day": 99999, "ai_min_minutes_between_doses": 0,
         "manual_max_seconds_per_day": 99999}}}
     lim = WaterBudget(loose, tmp_path).limits()
-    assert lim["max_seconds_per_dose"] == 60
-    assert lim["ai_max_seconds_per_day"] == 120
+    assert lim["max_seconds_per_dose"] == 900
+    assert lim["ai_max_seconds_per_day"] == 3600
     assert lim["ai_min_minutes_between_doses"] == 30
-    assert lim["manual_max_seconds_per_day"] == 300
+    assert lim["manual_max_seconds_per_day"] == 3600
 
 
 def test_run_pump_blocks_without_touching_pump(tmp_path, monkeypatch):
@@ -136,3 +136,19 @@ def test_memory_reset_refuses_during_checkin(tmp_path):
         _checkin_lock = True
     with pytest.raises(RuntimeError):
         reset_ai_memory(tmp_path, grower=G())
+
+
+def test_ten_minute_full_watering_fits_and_ai_is_told(tmp_path):
+    import shutil
+    from pathlib import Path
+    import yaml
+    from src.context_manager import ContextManager
+    repo = Path(__file__).resolve().parent.parent
+    cfg = yaml.safe_load((repo / "config.yaml").read_text(encoding="utf-8"))
+    wb = WaterBudget(cfg, tmp_path)
+    assert wb.reserve(600, "ai")[0] == 600                     # one full watering in one dose
+    (tmp_path / "prompts").mkdir()
+    shutil.copy(repo / "prompts" / "system_prompt.md", tmp_path / "prompts" / "system_prompt.md")
+    prompt = ContextManager(str(tmp_path), cfg).build_system_prompt()
+    assert "running the pump for about 10 minutes" in prompt and "about 600 seconds" in prompt
+    assert "about 4 full waterings per day" in prompt

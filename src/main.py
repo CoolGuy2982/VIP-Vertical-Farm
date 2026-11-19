@@ -141,6 +141,8 @@ def main():
     remote.start()
 
     check_kasa(config, logger)
+    # Doses can be ~10 min long: if the last run died mid-dose, the plug may still be on
+    grower.actuators.pump_off_failsafe()
 
     if grower.paused:
         # Standby (e.g. empty tent): no hardware test, and the light stays off

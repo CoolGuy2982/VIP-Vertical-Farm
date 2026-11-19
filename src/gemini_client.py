@@ -68,11 +68,11 @@ GROWER_TOOLS = [
     {
         "name": "run_pump",
         "description": (
-            "Run the water pump for a precise number of seconds via the Kasa cloud. "
-            "IMPORTANT: The cloud API adds ~2-3s of latency on both ON and OFF commands — "
-            "always add 5s of buffer to your target duration. "
-            "A full tray watering requires ~40 seconds; anything under 20s will not wet the whole tray "
-            "reach all rows. NEVER run if soil moisture is above 65%. Always log the reason. "
+            "Run the water pump for a number of seconds (Kasa cloud smart plug). "
+            "A full watering takes about 10 minutes (~600 s, see 'Watering' in your "
+            "instructions) so the water reaches the top of the rockwool; short runs only wet "
+            "the bottom. Excess water drains away, so only water when the rockwool is drying "
+            "out, never when it already looks saturated. Always give the reason. "
             "The controller enforces a hard daily water budget (per-dose cap, daily cap "
             "and minimum gap between doses, shown in the check-in context). Doses beyond "
             "it are shortened or refused with blocked=true; wait for the time given."
@@ -82,7 +82,8 @@ GROWER_TOOLS = [
             "properties": {
                 "seconds": {
                     "type": "number",
-                    "description": "Pump run duration in seconds (1-45). Be precise.",
+                    "description": "Pump run duration in seconds (a full watering is ~600). "
+                                   "The per-dose maximum is under Hard Limits.",
                 },
                 "reason": {
                     "type": "string",

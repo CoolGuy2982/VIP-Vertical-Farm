@@ -158,6 +158,34 @@ def rollback(state: dict, base: Path = BASE) -> str:
 
 # --------------------------------------------------------------------------- supervisor
 
+def kasa_pump_off(base: Path = BASE) -> None:
+    """After the grower exits for any reason, make sure the Kasa pump plug is off.
+
+    A crash in the middle of a (10-minute) dose would otherwise leave it running.
+    Self-contained and best effort, like the rest of this file.
+    """
+    try:
+        import asyncio
+        import yaml
+        from dotenv import dotenv_values
+        env = {**dotenv_values(base / ".env"), **os.environ}
+        user, password = env.get("KASA_USERNAME"), env.get("KASA_PASSWORD")
+        if not (user and password):
+            return
+        cfg = yaml.safe_load((base / "config.yaml").read_text(encoding="utf-8")) or {}
+        alias = (cfg.get("kasa_cloud", {}) or {}).get("device_alias", "Water Pump")
+        from tplinkcloud import TPLinkDeviceManager
+
+        async def _off():
+            device = await TPLinkDeviceManager(user, password).find_device(alias)
+            if device is not None:
+                await device.power_off()
+        asyncio.run(asyncio.wait_for(_off(), timeout=30))
+        log("pump plug switched off (failsafe)")
+    except Exception as e:
+        log(f"failsafe pump-off failed: {e}")
+
+
 class CrashMailer:
     """Email on crashes (same settings as src/notifier.py, kept self-contained).
 
@@ -229,6 +257,7 @@ class Supervisor:
         self.cmd = cmd or CHILD_CMD
         self.reporter = reporter if reporter is not None else Reporter(base)
         self.mailer = mailer if mailer is not None else CrashMailer(base)
+        self.pump_off = kasa_pump_off
         self.child: subprocess.Popen | None = None
         self.stopping = False
         self.tail: deque = deque(maxlen=80)
@@ -325,6 +354,8 @@ class Supervisor:
                                   "restarts": self.restarts, "supervised": True})
             code, ran_s = self.run_child(first)
             first = False
+            if code != 0:
+                self.pump_off(self.base)          # a clean exit already switched it off
             if self.stopping:
                 break
             self.restarts += 1

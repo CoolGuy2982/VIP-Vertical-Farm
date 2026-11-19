@@ -265,6 +265,8 @@ class ContextManager:
             "light_hours": stage.get("light_hours", "N/A"),
             "tray_tilt_degrees": h_specs.get("tray_tilt_degrees", 0),
             "growing_medium": plant.get("growing_medium", "growing medium"),
+            "full_watering_seconds": f"{self._full_watering_s():g}",
+            "full_watering_minutes": f"{self._full_watering_s() / 60:g}",
             "flow_rate": h_specs.get("flow_rate_ml_s", 1),
             "stage_guidance": stage_guidance,
         }
@@ -282,22 +284,27 @@ class ContextManager:
         from src.water_budget import WaterBudget
         wb = WaterBudget(self.config).limits()
         flow_rate = self.config.get("hardware_specs", {}).get("flow_rate_ml_s", 1)
+        full = self._full_watering_s()
         return (
             "## Hard Limits (enforced by the controller, you cannot change them)\n"
-            f"- Water budget: at most {wb['max_seconds_per_dose']:.0f} s per dose, at most "
-            f"{wb['ai_max_seconds_per_day']:.0f} s of pumping per rolling 24 h (about "
-            f"{wb['ai_max_seconds_per_day'] * flow_rate / 1000:.1f} L), and at least "
+            f"- Water budget: at most {wb['max_seconds_per_dose']:.0f} s "
+            f"({wb['max_seconds_per_dose'] / 60:.0f} min) per dose, at most "
+            f"{wb['ai_max_seconds_per_day']:.0f} s ({wb['ai_max_seconds_per_day'] / 60:.0f} min) "
+            f"of pumping per rolling 24 h, and at least "
             f"{wb['ai_min_minutes_between_doses']:.0f} minutes between doses. A dose over the "
             "limit is shortened or refused, and the tool result says when the next dose is "
-            f"allowed. That is enough for about {self._full_waterings(wb)} per day (a full "
-            "tray watering is ~40 s): use the extra only when the plants need it, not by "
-            "default. A refused dose is not an emergency: wait for the next allowed time and "
-            "do not retry before then."
+            f"allowed. That is enough for about {self._full_waterings(wb, full)} per day (a full "
+            f"watering is ~{full:.0f} s): you decide how many the plants need; water only when "
+            "the rockwool is drying out, not by default. A refused dose is not an emergency: "
+            "wait for the next allowed time and do not retry before then."
         )
 
+    def _full_watering_s(self) -> float:
+        return float((self.config.get("water_pump", {}) or {}).get("full_watering_seconds", 600))
+
     @staticmethod
-    def _full_waterings(wb: dict) -> str:
-        n = max(1, round(wb["ai_max_seconds_per_day"] / 40))
+    def _full_waterings(wb: dict, full_s: float = 600) -> str:
+        n = max(1, int(wb["ai_max_seconds_per_day"] // max(full_s, 1)))
         return "one full watering" if n == 1 else f"{n} full waterings"
 
     def build_system_prompt(self) -> str:

@@ -205,6 +205,21 @@ class Actuators:
         self._log_action(result)
         return result
 
+    def pump_off_failsafe(self) -> bool:
+        """Switch the Kasa pump plug off (startup / after a crash). Best effort."""
+        if not (self._kasa_user and self._kasa_pass):
+            return False
+        try:
+            async def _off():
+                device = await self._get_pump_device()
+                await device.power_off()
+            self._run_async(_off())
+            logger.info("pump plug '%s' switched off (failsafe)", self._device_alias)
+            return True
+        except Exception as e:
+            logger.warning("failsafe pump-off failed: %s", e)
+            return False
+
     # ── Grow light (physical relay, Active-Low) ───────────────────────────────
 
     def _gpio_ready(self) -> bool:

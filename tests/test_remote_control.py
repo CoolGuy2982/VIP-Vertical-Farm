@@ -137,11 +137,12 @@ def test_poll_fallback_without_listener(env):
 
 def test_manual_pump_uses_manual_budget(env, monkeypatch):
     monkeypatch.setattr(env.grower.actuators, "_run_async", lambda coro: coro.close())
-    d = send(env, "pump", {"seconds": 45, "reason": "test"})
-    assert d["status"] == "done" and d["result"]["seconds"] == 45
-    send(env, "pump", {"seconds": 45})
-    d = send(env, "pump", {"seconds": 45})
-    assert d["result"]["seconds"] == 30                     # 120 s manual cap
+    cap = env.config["water_pump"]["budget"]["manual_max_seconds_per_day"]   # 1800 s
+    d = send(env, "pump", {"seconds": 600, "reason": "full watering"})
+    assert d["status"] == "done" and d["result"]["seconds"] == 600   # a 10-min dose is allowed
+    send(env, "pump", {"seconds": 600})
+    d = send(env, "pump", {"seconds": 650})
+    assert d["result"]["seconds"] == cap - 1200             # trimmed to what is left
     d = send(env, "pump", {"seconds": 10})
     assert d["status"] == "error" and "Water budget" in d["error"]
     # the AI budget is untouched
@@ -169,7 +170,7 @@ def test_set_plant_writes_local_config(env):
 def test_get_config(env):
     r = send(env, "get_config")["result"]
     assert "water_pump" in r["config_yaml"] and r["local_yaml"] == ""
-    assert r["water_budget_ceilings"]["ai_max_seconds_per_day"] == 120
+    assert r["water_budget_ceilings"]["ai_max_seconds_per_day"] == 3600
 
 
 def test_set_config_rejects_bad_yaml_and_bad_values(env):

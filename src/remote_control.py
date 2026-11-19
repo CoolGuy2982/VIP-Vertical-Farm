@@ -178,7 +178,7 @@ def validate_config(cfg) -> list[str]:
             errors.append(f"{path} must be a number from {lo} to {hi}")
 
     num("water_pump.min_seconds_per_dose", 0, 60)
-    num("water_pump.max_seconds_per_dose", 1, 600)
+    num("water_pump.max_seconds_per_dose", 1, 900)
     num("water_pump.budget.ai_max_seconds_per_day", 0, 100000)
     num("water_pump.budget.ai_min_minutes_between_doses", 0, 100000)
     num("water_pump.budget.manual_max_seconds_per_day", 0, 100000)

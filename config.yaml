@@ -56,14 +56,15 @@ kasa_cloud:
 # Water pump calibration
 water_pump:
   min_seconds_per_dose: 1
-  max_seconds_per_dose: 45   # Never run longer than this in one shot (hard cap 60 in code)
+  max_seconds_per_dose: 660  # one full watering (~10 min) plus margin (hard cap 15 min in code)
+  full_watering_seconds: 600 # pumping needed for water to reach the top of the rockwool (told to the AI)
   # Hard water budget, enforced in Actuators.run_pump (src/water_budget.py).
   # Rolling 24 h windows, persisted in data/pump_doses.json so restarts don't reset it.
-  # Code ceilings: AI <= 120 s/day, gap >= 30 min, manual <= 300 s/day.
+  # Code ceilings: AI <= 60 min/day, gap >= 30 min, manual <= 60 min/day.
   budget:
-    ai_max_seconds_per_day: 90         # AI tool calls + scheduled pump actions (~15 L at 168 mL/s, ~2 full waterings)
+    ai_max_seconds_per_day: 2400       # AI + scheduled doses: 40 min = up to 4 full waterings; the AI decides when
     ai_min_minutes_between_doses: 120
-    manual_max_seconds_per_day: 120    # website / local API / startup test, counted separately
+    manual_max_seconds_per_day: 1800   # website / local API / startup test, counted separately
 
 # Grow light
 light:

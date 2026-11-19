@@ -23,10 +23,11 @@ WINDOW_S = 24 * 3600
 
 # Absolute ceilings in code: a typo in config.yaml / config.local.yaml can
 # tighten the budget but never loosen it past these.
-HARD_MAX_SECONDS_PER_DOSE = 60
-HARD_MAX_AI_SECONDS_PER_DAY = 120
+# (A full watering floods the tray to the top of the rockwool: ~10 min of pumping.)
+HARD_MAX_SECONDS_PER_DOSE = 900          # 15 min
+HARD_MAX_AI_SECONDS_PER_DAY = 3600       # 60 min
 HARD_MIN_AI_GAP_MINUTES = 30
-HARD_MAX_MANUAL_SECONDS_PER_DAY = 300
+HARD_MAX_MANUAL_SECONDS_PER_DAY = 3600   # 60 min
 
 AI_SOURCES = {"ai", "scheduled"}
 
